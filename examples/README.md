@@ -9,7 +9,7 @@ first time, start with `quickstart/`. Healthcare is the reference vertical —
 | Directory | Description |
 |---|---|
 | [`quickstart/`](quickstart/) | Minimal "hello, database" script |
-| [`rust/`](rust/) | Rust SDK examples: basic, streaming, time-travel, clinic, axum + actix |
+| [`rust/`](rust/) | Rust SDK examples: basic, streaming, time-travel, clinic, axum + actix, **ehr-mini** (FHIR R4 pipeline), **smart-on-fhir-app** (SMART standalone launch + scope enforcement) |
 | [`typescript/`](typescript/) | TypeScript SDK examples: `express-app/`, `nextjs-app/` |
 | [`python/`](python/) | Python SDK examples: `fastapi-app/`, `django-app/` |
 | [`docker/`](docker/) | Docker and Docker Compose configurations |
@@ -42,3 +42,15 @@ python examples/healthcare/clinic.py
 
 Most examples honour `KIMBERLITE_ADDR=host:port` to target a non-default
 server.
+
+### Offline examples
+
+A handful of Rust examples run **without** a server — they showcase
+library APIs end-to-end and are the quickest way to see Kimberlite's
+FHIR pipeline:
+
+```bash
+cd examples/rust
+cargo run --example ehr_mini             # parse Bundle → events → projections → FHIRPath
+cargo run --example smart_on_fhir_app    # SMART standalone-launch + PKCE + scope-enforced FHIR read
+```

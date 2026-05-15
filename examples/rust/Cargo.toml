@@ -7,7 +7,22 @@ publish = false
 [dependencies]
 kimberlite-client = { path = "../../crates/kimberlite-client" }
 kimberlite-types = { path = "../../crates/kimberlite-types" }
+kimberlite-fhir = { path = "../../crates/kimberlite-fhir" }
+kimberlite-fhir-store = { path = "../../crates/kimberlite-fhir-store" }
+kimberlite-rbac = { path = "../../crates/kimberlite-rbac" }
 anyhow = "1"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+axum = "0.7"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "aws_lc_rs"] }
+sha2 = "0.10"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+url = "2"
+chrono = "0.4"
 
 [dev-dependencies]
 axum = "0.7"
@@ -39,3 +54,11 @@ path = "src/actix_app.rs"
 [[example]]
 name = "clinic"
 path = "src/clinic.rs"
+
+[[example]]
+name = "ehr_mini"
+path = "src/ehr_mini.rs"
+
+[[example]]
+name = "smart_on_fhir_app"
+path = "src/smart_on_fhir_app.rs"
