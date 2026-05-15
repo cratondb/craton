@@ -38,6 +38,7 @@ criteria are all green.
 [`v0.6.0`]: https://github.com/kimberlitedb/kimberlite/releases/tag/v0.6.0
 [`v0.7.0`]: https://github.com/kimberlitedb/kimberlite/releases/tag/v0.7.0
 [`v0.8.0`]: https://github.com/kimberlitedb/kimberlite/releases/tag/v0.8.0
+[`docs-internal/design-docs/active/cluster-graduation-v0.9.x.md`]: docs-internal/design-docs/active/cluster-graduation-v0.9.x.md
 
 ---
 
@@ -73,6 +74,20 @@ quote real numbers instead of qualitative language.
       mutation; the driver step that injects + asserts ships per
       family. Currently each variant runs the baseline workload
       via `ScenarioConfig::aspirational_v07`. Carried over.
+- [ ] **Graduate `kimberlite-cluster` to production-ready.**
+      Healthcare clinical workloads require multi-node HA (5+
+      nines). Cluster today is a single-machine process
+      supervisor with placeholder `sleep infinity` subprocess
+      spawning; the consensus protocol itself lives in
+      `kimberlite-vsr` and is mature. The graduation work is
+      integration plumbing + operational surface: real
+      subprocess spawn, HTTP `/healthz` + `/readyz` + `/metrics`
+      per node, 3-node integration tests with real binaries,
+      multi-host topology support, backup/restore semantics,
+      cluster-level VOPR scenarios, and ops runbooks. Full
+      punch list at
+      [`docs-internal/design-docs/active/cluster-graduation-v0.9.x.md`].
+      Estimated ~9.5 weeks of focused effort.
 - [ ] **Pool metrics — client-side Prometheus parity.** Server-side
       metrics already exist at
       `crates/kimberlite-server/src/metrics.rs`; v0.7.0 + v0.8.0

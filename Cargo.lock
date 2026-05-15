@@ -3180,6 +3180,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "kimberlite-fhir"
+version = "0.8.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "kimberlite-fhir-store"
+version = "0.8.0"
+dependencies = [
+ "chrono",
+ "kimberlite-compliance",
+ "kimberlite-fhir",
+ "kimberlite-types",
+ "postcard",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "kimberlite-hl7v2"
+version = "0.8.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "kimberlite-io"
 version = "0.8.0"
 dependencies = [
@@ -3294,6 +3330,8 @@ name = "kimberlite-rbac"
 version = "0.8.0"
 dependencies = [
  "blake3",
+ "chrono",
+ "jsonwebtoken",
  "kimberlite-types",
  "proptest",
  "serde",

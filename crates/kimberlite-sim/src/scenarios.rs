@@ -328,6 +328,149 @@ pub enum ScenarioType {
     /// partial result as complete. Canary: an in-progress-erasure
     /// audit record gets misclassified as `Completed`.
     EraseAutoDiscoveryWithCrashMidScan,
+
+    // ========================================================================
+    // Q2 (v0.9.x) — Healthcare clinical workload scenarios.
+    // Scaffolded — drivers ship per-scenario as the kimberlite-hl7v2
+    // ingest path and kimberlite-fhir-store projection workers land
+    // in subsequent commits. Each variant pins the clinical workload
+    // shape together with the audit-grade invariant it MUST satisfy.
+    // ========================================================================
+
+    /// **EHR admissions surge** — 10x burst of ADT^A01 messages
+    /// arriving via MLLP (flu season, mass-casualty triage, scheduled
+    /// open-enrollment day). The PV1 visit creation and the
+    /// `fhir.Patient.<tenant>` + `fhir.Encounter.<tenant>` stream
+    /// appends must remain atomic per-message — a half-applied
+    /// Patient with no corresponding Encounter is a HIPAA
+    /// integrity event. Canary: the ingest worker batches Patient
+    /// and Encounter writes into separate transactions and the
+    /// Patient stream gets ahead of Encounter under sustained
+    /// surge.
+    EhrAdmissionsSurge,
+
+    /// **Lab result delayed delivery** — ORU^R01 observation results
+    /// arriving hours or days after the originating Encounter (real
+    /// pathology turnaround). The `Observation.encounter` reference
+    /// must resolve to the historical Encounter as it existed at
+    /// the time of the lab order, not the encounter's current
+    /// post-discharge state. Time-travel via `AS OF TIMESTAMP <order_time>`
+    /// MUST return the same Encounter projection regardless of when
+    /// the resolving read is issued. Canary: the FHIR projector
+    /// uses the *write-time* Encounter snapshot instead of the
+    /// kernel's MVCC at-offset view, leaking post-discharge state
+    /// into pre-discharge result interpretations.
+    LabResultDelayedDelivery,
+
+    /// **Claims batch reconciliation** — nightly cycle where X12 837
+    /// (institutional claim) submissions are matched against 835
+    /// (electronic remittance advice) responses. The append-only
+    /// claims-event stream must remain monotonic across the full
+    /// 100k-row batch even when storage faults are injected
+    /// mid-batch. A retry under fault must produce the same
+    /// post-state as a clean run (idempotency). Canary: a retried
+    /// 837 submit double-counts in the `claims_submitted` counter
+    /// because the storage adapter doesn't dedupe on `Field 1000-NM1`
+    /// claim-control-number.
+    ClaimsBatchReconciliation,
+
+    /// **Break-glass under load** — emergency override of PHI access
+    /// (HIPAA § 164.510(b)(3)) activated by a clinician during
+    /// sustained high write throughput on the same patient's
+    /// streams. The `BreakGlassActivated` audit event MUST appear
+    /// at a strictly earlier offset than every PHI read the
+    /// activating user issues inside the session, and
+    /// `BreakGlassClosed` MUST list every resource id touched —
+    /// even when 1000 inserts/sec are racing the same chain head.
+    /// Canary: under contention, the audit-log inserter batches the
+    /// `BreakGlassActivated` event and a PHI read lands at an
+    /// earlier offset, leaving the regulator with a forensic
+    /// hole.
+    BreakGlassUnderLoad,
+
+    /// **Consent revocation cascade** — patient withdraws consent
+    /// (GDPR Art. 7(3) / HIPAA Authorization revocation) while
+    /// research queries against their PHI are in flight. New
+    /// queries after the revocation timestamp MUST return empty
+    /// for the revoked-scope rows; in-flight queries started
+    /// before revocation MUST complete with the pre-revocation
+    /// snapshot (consistency over abruption); the
+    /// `ConsentWithdrawn` audit event MUST chain-precede the
+    /// erasure-request audit event MUST chain-precede the
+    /// `Effect::ProjectionRowsPurge`. Canary: a torn revocation
+    /// where the consent table updates atomically but the
+    /// projection purge is asynchronous, allowing a research
+    /// query started 50ms after revocation to still see the
+    /// withdrawn rows.
+    ConsentRevocationCascade,
+
+    // ========================================================================
+    // Q2 (v0.9.x) — Cluster-level supervisor scenarios. Sibling to the
+    // VSR consensus scenarios above: these target the `kimberlite-cluster`
+    // process supervisor, not the VSR protocol. The supervisor today is
+    // a single-machine harness; these scenarios pin the contracts the
+    // production-ready supervisor must satisfy. Drivers ship per-scenario
+    // as T1.* (real subprocess spawn + HTTP health endpoints) of the
+    // graduation plan lands. See
+    // docs-internal/design-docs/active/cluster-graduation-v0.9.x.md.
+    // ========================================================================
+
+    /// **Cluster: single-node process crash** — SIGKILL one
+    /// follower's `kimberlite start` subprocess. The supervisor
+    /// MUST detect the death within `health_check_interval_ms`,
+    /// restart the node with bounded exponential backoff, and
+    /// audit-log every restart attempt (count + reason). The
+    /// other N-1 nodes MUST remain writable throughout. Canary:
+    /// a supervisor that retries restart at unbounded frequency
+    /// (no backoff) on a node whose binary is broken — burning
+    /// CPU and saturating fd tables instead of exposing
+    /// `/readyz: red` to the ops team.
+    ClusterNodeProcessCrash,
+
+    /// **Cluster: cascading node failure** — N-1 nodes (where
+    /// N is quorum size on a 3-node cluster: 2 of 3) crash in
+    /// rapid sequence. The cluster MUST refuse writes (no quorum)
+    /// but MUST NOT lose any entry that was committed before
+    /// the cascade. When nodes recover, the new leader's log
+    /// MUST contain every committed entry from before the
+    /// cascade, in order. Canary: a supervisor that retries the
+    /// pre-cascade leader's restart too aggressively, racing the
+    /// view-change protocol and causing a split-brain transient.
+    ClusterCascadingNodeFailure,
+
+    /// **Cluster: health-check timeout** — a node's `kimberlite start`
+    /// process hangs (e.g. stuck in a tight loop on a kernel
+    /// fault) without crashing. The supervisor MUST flip the
+    /// node's `/readyz` to red within `health_check_timeout_ms`,
+    /// escalate to a forced restart, and the cluster MUST initiate
+    /// a view change to elect a new leader if the hung node was
+    /// leader. Canary: a supervisor that relies solely on
+    /// `child.try_wait()` (process-still-alive) and misses the
+    /// hung-but-running case, leaving the cluster wedged.
+    ClusterHealthCheckTimeout,
+
+    /// **Cluster: config reload under load** — `cluster.toml` is
+    /// updated mid-write (e.g. an operator edits a peer's IP).
+    /// The supervisor MUST apply the new config without losing
+    /// any in-flight committed write and without dropping the
+    /// VSR view. Reloads that would shrink quorum below safety
+    /// MUST be rejected with a typed error. Canary: a supervisor
+    /// that restarts each node sequentially with the new config
+    /// without coordinating the view-change, causing a
+    /// transient quorum loss between the first node's restart
+    /// and the new leader's election.
+    ClusterConfigReloadUnderLoad,
+
+    /// **Cluster: rolling restart full cluster** — operator
+    /// performs a rolling restart (stop node, wait for follower
+    /// to catch up, start node) across all N nodes in sequence.
+    /// At every step the cluster MUST remain writable with
+    /// quorum preserved, and at completion every committed
+    /// entry that existed pre-restart MUST exist post-restart
+    /// at the same offset. Canary: the supervisor's
+    /// `stop_node()` returns before the node's data is flushed
+    /// to disk, so a subsequent start sees a torn log tail.
+    ClusterRollingRestartFullCluster,
 }
 
 impl ScenarioType {
@@ -433,6 +576,16 @@ impl ScenarioType {
             Self::EraseAutoDiscoveryWithDroppedColumn => "Erase Auto-Discovery: Dropped Column",
             Self::EraseAutoDiscoveryDeterminism => "Erase Auto-Discovery: Determinism",
             Self::EraseAutoDiscoveryWithCrashMidScan => "Erase Auto-Discovery: Crash Mid-Scan",
+            Self::EhrAdmissionsSurge => "Clinical: EHR Admissions Surge",
+            Self::LabResultDelayedDelivery => "Clinical: Lab Result Delayed Delivery",
+            Self::ClaimsBatchReconciliation => "Clinical: Claims Batch Reconciliation",
+            Self::BreakGlassUnderLoad => "Clinical: Break-Glass Under Load",
+            Self::ConsentRevocationCascade => "Clinical: Consent Revocation Cascade",
+            Self::ClusterNodeProcessCrash => "Cluster: Single-Node Process Crash",
+            Self::ClusterCascadingNodeFailure => "Cluster: Cascading Node Failure",
+            Self::ClusterHealthCheckTimeout => "Cluster: Health-Check Timeout",
+            Self::ClusterConfigReloadUnderLoad => "Cluster: Config Reload Under Load",
+            Self::ClusterRollingRestartFullCluster => "Cluster: Rolling Restart (Full Cluster)",
         }
     }
 
@@ -717,6 +870,36 @@ impl ScenarioType {
             Self::EraseAutoDiscoveryWithCrashMidScan => {
                 "Storage crash mid-discovery re-issues the scan; partial results never reported as Completed. (v0.7.0 scaffold)"
             }
+            Self::EhrAdmissionsSurge => {
+                "10x ADT^A01 burst — Patient + Encounter stream appends must remain atomic per-message under sustained MLLP load. (Q2 scaffold)"
+            }
+            Self::LabResultDelayedDelivery => {
+                "ORU^R01 results arrive hours after the originating Encounter; AS OF resolves the historical Encounter snapshot, not the post-discharge state. (Q2 scaffold)"
+            }
+            Self::ClaimsBatchReconciliation => {
+                "Nightly X12 837 → 835 reconciliation across 100k claims; retry under storage fault is idempotent on claim-control-number. (Q2 scaffold)"
+            }
+            Self::BreakGlassUnderLoad => {
+                "Break-glass activation under 1k inserts/sec — BreakGlassActivated audit MUST precede every PHI read in the session, BreakGlassClosed MUST enumerate every accessed resource. (Q2 scaffold)"
+            }
+            Self::ConsentRevocationCascade => {
+                "Consent withdrawal during in-flight research queries; in-flight queries see pre-revocation snapshot, new queries see empty, audit chain links Withdrawn → ErasureRequested → ProjectionRowsPurge. (Q2 scaffold)"
+            }
+            Self::ClusterNodeProcessCrash => {
+                "SIGKILL a follower's subprocess; supervisor restarts with bounded backoff and audits every attempt; other N-1 nodes remain writable. (Q2 cluster scaffold)"
+            }
+            Self::ClusterCascadingNodeFailure => {
+                "N-1 nodes crash in rapid sequence; cluster blocks writes but loses no committed entries; recovery preserves pre-cascade log in order. (Q2 cluster scaffold)"
+            }
+            Self::ClusterHealthCheckTimeout => {
+                "Node process hangs without crashing; /readyz flips red within timeout, supervisor escalates to forced restart, view change elects new leader if the hung node was primary. (Q2 cluster scaffold)"
+            }
+            Self::ClusterConfigReloadUnderLoad => {
+                "cluster.toml updated mid-write; supervisor applies new config without losing in-flight writes or dropping VSR view; quorum-shrinking reloads rejected. (Q2 cluster scaffold)"
+            }
+            Self::ClusterRollingRestartFullCluster => {
+                "Rolling restart sequenced across all N nodes; cluster writable throughout with quorum preserved; every pre-restart committed entry survives at the same offset. (Q2 cluster scaffold)"
+            }
         }
     }
 
@@ -765,6 +948,21 @@ impl ScenarioType {
                 | Self::EraseAutoDiscoveryWithDroppedColumn
                 | Self::EraseAutoDiscoveryDeterminism
                 | Self::EraseAutoDiscoveryWithCrashMidScan
+                // Q2 — Healthcare clinical scenarios. Drivers ship as
+                // the v2 ingest path and FHIR projection workers land.
+                | Self::EhrAdmissionsSurge
+                | Self::LabResultDelayedDelivery
+                | Self::ClaimsBatchReconciliation
+                | Self::BreakGlassUnderLoad
+                | Self::ConsentRevocationCascade
+                // Q2 — Cluster supervisor scenarios. Drivers ship as the
+                // graduation T1.* work (real subprocess spawn + HTTP
+                // health endpoints) lands.
+                | Self::ClusterNodeProcessCrash
+                | Self::ClusterCascadingNodeFailure
+                | Self::ClusterHealthCheckTimeout
+                | Self::ClusterConfigReloadUnderLoad
+                | Self::ClusterRollingRestartFullCluster
         )
     }
 
@@ -872,6 +1070,18 @@ impl ScenarioType {
             Self::EraseAutoDiscoveryWithDroppedColumn,
             Self::EraseAutoDiscoveryDeterminism,
             Self::EraseAutoDiscoveryWithCrashMidScan,
+            // Q2 — Healthcare clinical scenarios.
+            Self::EhrAdmissionsSurge,
+            Self::LabResultDelayedDelivery,
+            Self::ClaimsBatchReconciliation,
+            Self::BreakGlassUnderLoad,
+            Self::ConsentRevocationCascade,
+            // Q2 — Cluster supervisor scenarios.
+            Self::ClusterNodeProcessCrash,
+            Self::ClusterCascadingNodeFailure,
+            Self::ClusterHealthCheckTimeout,
+            Self::ClusterConfigReloadUnderLoad,
+            Self::ClusterRollingRestartFullCluster,
         ]
     }
 }
@@ -1018,6 +1228,29 @@ impl ScenarioConfig {
             | ScenarioType::EraseAutoDiscoveryWithDroppedColumn
             | ScenarioType::EraseAutoDiscoveryDeterminism
             | ScenarioType::EraseAutoDiscoveryWithCrashMidScan => {
+                Self::aspirational_v07(scenario_type)
+            }
+
+            // Q2 — Healthcare clinical scenarios. Share the same
+            // baseline-scaffold treatment as the v0.7.0 family until
+            // the v2 ingest + FHIR projection workers ship the
+            // domain-specific drivers.
+            ScenarioType::EhrAdmissionsSurge
+            | ScenarioType::LabResultDelayedDelivery
+            | ScenarioType::ClaimsBatchReconciliation
+            | ScenarioType::BreakGlassUnderLoad
+            | ScenarioType::ConsentRevocationCascade => {
+                Self::aspirational_v07(scenario_type)
+            }
+
+            // Q2 — Cluster supervisor scenarios. Same baseline-scaffold
+            // until T1.* of the graduation plan ships the supervisor
+            // drivers.
+            ScenarioType::ClusterNodeProcessCrash
+            | ScenarioType::ClusterCascadingNodeFailure
+            | ScenarioType::ClusterHealthCheckTimeout
+            | ScenarioType::ClusterConfigReloadUnderLoad
+            | ScenarioType::ClusterRollingRestartFullCluster => {
                 Self::aspirational_v07(scenario_type)
             }
         }
