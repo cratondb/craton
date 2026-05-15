@@ -1,0 +1,17 @@
+[package]
+name = "kimberlite-hl7v2"
+description = "HL7 v2.x parser, encoder, and MLLP framing for Kimberlite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

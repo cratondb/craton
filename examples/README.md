@@ -9,7 +9,7 @@ first time, start with `quickstart/`. Healthcare is the reference vertical —
 | Directory | Description |
 |---|---|
 | [`quickstart/`](quickstart/) | Minimal "hello, database" script |
-| [`rust/`](rust/) | Rust SDK examples: basic, streaming, time-travel, clinic, axum + actix, **ehr-mini** (FHIR R4 pipeline), **smart-on-fhir-app** (SMART standalone launch + scope enforcement) |
+| [`rust/`](rust/) | Rust SDK examples: basic, streaming, time-travel, clinic, axum + actix, **ehr-mini** (FHIR R4 pipeline), **smart-on-fhir-app** (SMART standalone launch + scope enforcement), **hl7v2-feed** (MLLP → ADT^A01 → ACK ingest pipeline) |
 | [`typescript/`](typescript/) | TypeScript SDK examples: `express-app/`, `nextjs-app/` |
 | [`python/`](python/) | Python SDK examples: `fastapi-app/`, `django-app/` |
 | [`docker/`](docker/) | Docker and Docker Compose configurations |
@@ -53,4 +53,5 @@ FHIR pipeline:
 cd examples/rust
 cargo run --example ehr_mini             # parse Bundle → events → projections → FHIRPath
 cargo run --example smart_on_fhir_app    # SMART standalone-launch + PKCE + scope-enforced FHIR read
+cargo run --example hl7v2_feed           # MLLP → HL7 v2 ADT^A01 → typed accessors → ACK
 ```

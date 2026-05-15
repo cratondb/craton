@@ -9,6 +9,7 @@ kimberlite-client = { path = "../../crates/kimberlite-client" }
 kimberlite-types = { path = "../../crates/kimberlite-types" }
 kimberlite-fhir = { path = "../../crates/kimberlite-fhir" }
 kimberlite-fhir-store = { path = "../../crates/kimberlite-fhir-store" }
+kimberlite-hl7v2 = { path = "../../crates/kimberlite-hl7v2" }
 kimberlite-rbac = { path = "../../crates/kimberlite-rbac" }
 anyhow = "1"
 serde_json = "1"
@@ -62,3 +63,7 @@ path = "src/ehr_mini.rs"
 [[example]]
 name = "smart_on_fhir_app"
 path = "src/smart_on_fhir_app.rs"
+
+[[example]]
+name = "hl7v2_feed"
+path = "src/hl7v2_feed.rs"
