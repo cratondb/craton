@@ -1,14 +1,27 @@
 //! Health check endpoints for liveness and readiness probes.
 //!
-//! Provides `/health` (liveness) and `/ready` (readiness) endpoints
-//! for Kubernetes and load balancer health checks.
+//! Provides `/healthz` (liveness) and `/readyz` (readiness) endpoints
+//! for Kubernetes and load balancer health checks. The `/health` and
+//! `/ready` paths are kept as back-compat aliases.
+//!
+//! In replicated mode the readiness check additionally requires that
+//! VSR has completed bootstrap, the local replica is in `Normal`
+//! status, and `commit_lag_seconds` is below `max_replication_lag`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::metrics::Metrics;
+use crate::replication::CommandSubmitter;
+
+/// Default maximum replication lag (seconds) before `/readyz` flips
+/// to 503. Picked to comfortably exceed the dev `view_change_timeout`
+/// (1 s) so a short view-change window doesn't false-positive a
+/// follower; operators can override per-deployment.
+pub const DEFAULT_MAX_REPLICATION_LAG_SECONDS: f64 = 5.0;
 
 /// Health check status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,6 +115,14 @@ pub struct HealthChecker {
     data_dir: std::path::PathBuf,
     /// Minimum free disk space (10% by default).
     min_disk_free_percent: f64,
+    /// Replication submitter for VSR-aware readiness checks. `None`
+    /// in tests / direct mode; `Some` in single-node and cluster
+    /// modes whether we ran via [`Self::with_submitter`].
+    submitter: Option<Arc<CommandSubmitter>>,
+    /// Maximum acceptable replication lag in seconds before `/readyz`
+    /// flips to 503. Tunable so chaos / latency-sensitive deployments
+    /// can dial it independently of the VSR view-change timeout.
+    max_replication_lag_seconds: f64,
 }
 
 impl HealthChecker {
@@ -111,7 +132,34 @@ impl HealthChecker {
             start_time: Instant::now(),
             data_dir: data_dir.as_ref().to_path_buf(),
             min_disk_free_percent: 10.0,
+            submitter: None,
+            max_replication_lag_seconds: DEFAULT_MAX_REPLICATION_LAG_SECONDS,
         }
+    }
+
+    /// Attaches the [`CommandSubmitter`] so [`Self::readiness_check`]
+    /// can incorporate VSR status (bootstrap complete, replica
+    /// `Normal`, replication lag under threshold). Direct mode (no
+    /// VSR) is treated as always-ready and the submitter is still
+    /// useful so `kimberlite_committed_offset` etc. read 0 not
+    /// missing.
+    #[must_use]
+    pub fn with_submitter(mut self, submitter: Arc<CommandSubmitter>) -> Self {
+        self.submitter = Some(submitter);
+        self
+    }
+
+    /// Returns the attached submitter, if any. Used by the HTTP
+    /// sidecar to refresh cluster gauges at scrape time.
+    pub fn submitter(&self) -> Option<&Arc<CommandSubmitter>> {
+        self.submitter.as_ref()
+    }
+
+    /// Sets the maximum acceptable replication lag in seconds.
+    #[must_use]
+    pub fn with_max_replication_lag(mut self, seconds: f64) -> Self {
+        self.max_replication_lag_seconds = seconds;
+        self
     }
 
     /// Sets the minimum free disk space percentage.
@@ -138,7 +186,10 @@ impl HealthChecker {
     /// Performs a readiness check.
     ///
     /// Readiness checks verify that the service is ready to accept traffic.
-    /// This includes checking dependencies like storage and memory.
+    /// This includes checking dependencies like storage and memory, and —
+    /// when an attached [`CommandSubmitter`] is in replicated mode — that
+    /// VSR has bootstrapped, the local replica is `Normal`, and the
+    /// replication lag is under [`Self::with_max_replication_lag`].
     pub fn readiness_check(&self) -> HealthResponse {
         let mut checks = HashMap::new();
         let mut overall_status = HealthStatus::Ok;
@@ -171,12 +222,72 @@ impl HealthChecker {
         }
         checks.insert("data_dir".to_string(), data_check);
 
+        // Check VSR replication state if a submitter is attached.
+        // Direct mode reports `replica_status: None` and is treated as
+        // always-ready (single-node deployments don't have a notion of
+        // "lag"). Single-node and cluster modes apply the full check.
+        if let Some(submitter) = &self.submitter {
+            let vsr_check = self.check_vsr(submitter);
+            if vsr_check.status == HealthStatus::Unhealthy {
+                overall_status = HealthStatus::Unhealthy;
+            } else if vsr_check.status == HealthStatus::Degraded
+                && overall_status == HealthStatus::Ok
+            {
+                overall_status = HealthStatus::Degraded;
+            }
+            checks.insert("vsr".to_string(), vsr_check);
+        }
+
         HealthResponse {
             status: overall_status,
             checks,
             version: Some(env!("CARGO_PKG_VERSION").to_string()),
             uptime_seconds: Some(self.start_time.elapsed().as_secs()),
         }
+    }
+
+    /// Renders the VSR replication subset of the readiness check.
+    ///
+    /// Direct mode → always-ready. SingleNode → ready (always
+    /// bootstrapped, lag = 0). Cluster → ready iff bootstrap is
+    /// complete, the replica is in `Normal` status, and
+    /// `commit_lag_seconds` is under the configured maximum. Each
+    /// failure mode produces a distinct, operator-actionable
+    /// `message`.
+    fn check_vsr(&self, submitter: &CommandSubmitter) -> CheckResult {
+        let start = Instant::now();
+        let status = submitter.status();
+
+        // Direct mode has no VSR — pass through cleanly.
+        if status.replica_status.is_none() {
+            return CheckResult::ok().with_duration(start.elapsed());
+        }
+
+        if matches!(status.bootstrap_complete, Some(false)) {
+            return CheckResult::unhealthy("VSR bootstrap not complete")
+                .with_duration(start.elapsed());
+        }
+
+        match status.replica_status {
+            // "normal" or None (direct mode, already handled above) → continue.
+            Some("normal") | None => {}
+            Some(other) => {
+                return CheckResult::unhealthy(format!("VSR replica status: {other}"))
+                    .with_duration(start.elapsed());
+            }
+        }
+
+        if let Some(lag) = status.commit_lag_seconds {
+            if lag > self.max_replication_lag_seconds {
+                return CheckResult::degraded(format!(
+                    "replication lag {lag:.2}s exceeds threshold {:.2}s",
+                    self.max_replication_lag_seconds
+                ))
+                .with_duration(start.elapsed());
+            }
+        }
+
+        CheckResult::ok().with_duration(start.elapsed())
     }
 
     /// Checks disk space availability.

@@ -52,6 +52,25 @@ pub struct Metrics {
     // Authentication metrics
     /// Authentication attempts by method and result.
     pub auth_attempts: CounterVec,
+
+    // Cluster / VSR replication metrics (T1.2)
+    //
+    // Sampled into these gauges by `Metrics::sync_replication_status`,
+    // typically called from the HTTP sidecar's `/metrics` handler so the
+    // values reflect the latest [`ReplicationStatus`] at scrape time.
+    /// Local committed offset (VSR `commit_number`). 0 in direct mode.
+    pub committed_offset: Gauge,
+    /// Current view number. 0 in direct / single-node modes.
+    pub view_number: Gauge,
+    /// 1 if this replica is the leader, 0 otherwise.
+    pub is_leader: Gauge,
+    /// Seconds since this replica's `commit_number` last advanced.
+    /// 0 on the leader (writes commit immediately on this node);
+    /// followers report wall-clock time since their last apply, which
+    /// approximates "how far behind the leader are we" in a low-write
+    /// cluster. Operators paging on this should also watch
+    /// `kimberlite_committed_offset` per replica.
+    pub replication_lag_seconds: Gauge,
 }
 
 impl Metrics {
@@ -145,6 +164,31 @@ impl Metrics {
         )
         .expect("valid metric");
 
+        // Cluster / VSR replication metrics
+        let committed_offset = Gauge::new(
+            "kimberlite_committed_offset",
+            "Local VSR commit_number — highest op_number durably committed on this replica",
+        )
+        .expect("valid metric");
+
+        let view_number = Gauge::new(
+            "kimberlite_view_number",
+            "Current VSR view number on this replica",
+        )
+        .expect("valid metric");
+
+        let is_leader = Gauge::new(
+            "kimberlite_is_leader",
+            "1 if this replica is the leader for the current view, 0 otherwise",
+        )
+        .expect("valid metric");
+
+        let replication_lag_seconds = Gauge::new(
+            "kimberlite_replication_lag_seconds",
+            "Seconds since this replica's commit_number last advanced (0 on leader)",
+        )
+        .expect("valid metric");
+
         // Register all metrics
         registry
             .register(Box::new(requests_total.clone()))
@@ -182,6 +226,18 @@ impl Metrics {
         registry
             .register(Box::new(auth_attempts.clone()))
             .expect("register metric");
+        registry
+            .register(Box::new(committed_offset.clone()))
+            .expect("register metric");
+        registry
+            .register(Box::new(view_number.clone()))
+            .expect("register metric");
+        registry
+            .register(Box::new(is_leader.clone()))
+            .expect("register metric");
+        registry
+            .register(Box::new(replication_lag_seconds.clone()))
+            .expect("register metric");
 
         Self {
             registry,
@@ -197,6 +253,34 @@ impl Metrics {
             storage_records_written,
             storage_checkpoints,
             auth_attempts,
+            committed_offset,
+            view_number,
+            is_leader,
+            replication_lag_seconds,
+        }
+    }
+
+    /// Refreshes the cluster gauges (`kimberlite_committed_offset`,
+    /// `kimberlite_view_number`, `kimberlite_is_leader`,
+    /// `kimberlite_replication_lag_seconds`) from a freshly-sampled
+    /// [`crate::ReplicationStatus`]. Call from the `/metrics` HTTP
+    /// handler so each scrape sees current values without paying for a
+    /// background tick. Direct mode passes `None` and the gauges stay
+    /// at their initial zeros — Prometheus treats that as "no
+    /// replication" rather than "broken".
+    pub fn sync_replication_status(&self, status: Option<&crate::ReplicationStatus>) {
+        let Some(status) = status else {
+            return;
+        };
+        if let Some(commit) = status.commit_number {
+            self.committed_offset.set(commit as f64);
+        }
+        if let Some(view) = status.view {
+            self.view_number.set(view as f64);
+        }
+        self.is_leader.set(if status.is_leader { 1.0 } else { 0.0 });
+        if let Some(lag) = status.commit_lag_seconds {
+            self.replication_lag_seconds.set(lag);
         }
     }
 

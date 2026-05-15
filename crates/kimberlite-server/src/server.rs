@@ -114,17 +114,23 @@ impl Server {
             );
         }
 
-        // Create health checker
-        let health_checker = HealthChecker::new(&config.data_dir);
-
         // Create command submitter with replication mode. Wrapped in Arc
         // so the HTTP sidecar's chaos worker can share a handle with the
         // binary-protocol handler without either owning it exclusively.
+        // Constructed BEFORE the health checker so we can attach it for
+        // VSR-aware `/readyz` checks.
         let submitter = Arc::new(CommandSubmitter::new(
             &config.replication,
             db,
             &config.data_dir,
         )?);
+
+        // Create health checker. Attaches the submitter so `/readyz`
+        // can require VSR bootstrap + Normal status + lag-under-threshold;
+        // `/metrics` can refresh the cluster gauges from a fresh
+        // `ReplicationStatus` snapshot per scrape.
+        let health_checker = HealthChecker::new(&config.data_dir)
+            .with_submitter(Arc::clone(&submitter));
 
         // Install the cluster command router on the underlying
         // `Kimberlite` so that wire-level writes (which go through the

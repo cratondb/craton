@@ -124,7 +124,7 @@ impl HttpSidecar {
                         self.chaos.as_ref(),
                     );
 
-                    if let Err(e) = stream.write_all(response.as_bytes()) {
+                    if let Err(e) = write_full_response(&mut stream, response.as_bytes()) {
                         debug!("HTTP write error to {addr}: {e}");
                     }
                 }
@@ -192,6 +192,48 @@ fn find_subseq(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
 }
 
+/// Writes the full response to a non-blocking mio TcpStream,
+/// looping on `WouldBlock` so kernel send-buffer pressure doesn't
+/// silently truncate the body. `mio::net::TcpStream` is non-blocking
+/// by default — `std::io::Write::write_all` returns an error on the
+/// first `WouldBlock`, then dropping the stream sends a RST that
+/// surfaces to the client as "Connection reset by peer". This loop
+/// retries with brief sleeps until the data is fully sent or the
+/// deadline elapses (the latter rare for sub-MB responses).
+///
+/// Pre-existing latent bug: small responses (under one TCP packet)
+/// always succeeded so health/ready endpoints worked, but `/metrics`
+/// with its multi-KB Prometheus output reliably tripped the RST.
+fn write_full_response(
+    stream: &mut mio::net::TcpStream,
+    bytes: &[u8],
+) -> std::io::Result<()> {
+    let mut written = 0;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while written < bytes.len() {
+        if std::time::Instant::now() > deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "HTTP response write deadline elapsed",
+            ));
+        }
+        match stream.write(&bytes[written..]) {
+            Ok(0) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "stream write returned 0",
+                ));
+            }
+            Ok(n) => written += n,
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
 /// Reads remaining POST body bytes from the mio stream in non-blocking
 /// mode, polling briefly until the client's `Content-Length` worth of
 /// data has arrived or the deadline fires. Safe — no raw-fd gymnastics.
@@ -224,14 +266,23 @@ fn dispatch(
 ) -> String {
     match (method, path) {
         (Method::Get, "/metrics") => {
+            // Refresh cluster gauges from a fresh ReplicationStatus
+            // snapshot so the scrape sees current values without
+            // paying for a periodic background tick.
+            let status = health_checker.submitter().map(|s| s.status());
+            Metrics::global().sync_replication_status(status.as_ref());
             let body = Metrics::global().render();
             http_response(200, "text/plain; version=0.0.4; charset=utf-8", &body)
         }
-        (Method::Get, "/health") => {
+        // `/healthz` / `/readyz` are the Kubernetes-convention paths
+        // (originating from Google's internal `/healthz`). `/health`
+        // and `/ready` are kept as back-compat aliases for existing
+        // probes; both routes return identical responses.
+        (Method::Get, "/healthz" | "/health") => {
             let response = health_checker.liveness_check();
             http_response(200, "application/json", &response.to_json())
         }
-        (Method::Get, "/ready") => {
+        (Method::Get, "/readyz" | "/ready") => {
             let response = health_checker.readiness_check();
             let status_code = if response.status.is_healthy() {
                 200

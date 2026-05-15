@@ -13,7 +13,7 @@ use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use kimberlite::{CommandRouter, Kimberlite};
 use kimberlite_kernel::{Command, State as KernelState};
@@ -55,6 +55,13 @@ pub enum CommandSubmitter {
         /// application is NOT idempotent (duplicate CreateStream
         /// errors, duplicate AppendBatch fails on expected_offset).
         last_applied_op: Arc<Mutex<u64>>,
+        /// Wall-clock timestamp of the most recent successful local
+        /// apply on this replica. Drives `kimberlite_replication_lag_seconds`
+        /// in `/metrics`: a follower whose `commit_number` hasn't
+        /// advanced for N seconds reports `lag = N`. Initialised at
+        /// boot — initial lag is "time since process start" which is
+        /// fine; operators care about the steady-state delta.
+        last_commit_advance: Arc<Mutex<Instant>>,
     },
 }
 
@@ -139,15 +146,22 @@ impl CommandSubmitter {
                     .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                     .unwrap_or(false);
                 let last_applied_op = Arc::new(Mutex::new(0u64));
+                let last_commit_advance = Arc::new(Mutex::new(Instant::now()));
 
                 if enable_applier {
                     let applied_rx = replicator.subscribe_applied_commands(1024);
                     let db = db.clone();
                     let last_applied = Arc::clone(&last_applied_op);
+                    let lag_clock = Arc::clone(&last_commit_advance);
                     thread::Builder::new()
                         .name("kimberlite-projection-applier".into())
                         .spawn(move || {
-                            Self::run_projection_applier_inner(applied_rx, db, last_applied);
+                            Self::run_projection_applier_inner(
+                                applied_rx,
+                                db,
+                                last_applied,
+                                lag_clock,
+                            );
                         })
                         .map_err(|e| {
                             ServerError::Replication(format!(
@@ -161,6 +175,7 @@ impl CommandSubmitter {
                     replicator: Arc::new(RwLock::new(replicator)),
                     db,
                     last_applied_op,
+                    last_commit_advance,
                 })
             }
         }
@@ -171,8 +186,13 @@ impl CommandSubmitter {
     /// `false` if the op was already covered. The mutex serialises the
     /// compare-and-submit so concurrent leader-inline + fanout-applier
     /// paths don't double-apply.
+    ///
+    /// On a successful apply, also bumps `last_commit_advance` so the
+    /// `kimberlite_replication_lag_seconds` gauge reflects steady-state
+    /// progress without paying for a separate tick.
     fn apply_once_to_projection(
         last_applied: &Mutex<u64>,
+        last_commit_advance: &Mutex<Instant>,
         db: &Kimberlite,
         op: u64,
         command: &Command,
@@ -187,6 +207,13 @@ impl CommandSubmitter {
             // command directly to their projection.
             db.apply_local(command.clone())?;
             *guard = op;
+            // Best-effort wall-clock update for the lag gauge. Lock
+            // poisoning here doesn't fail the apply — the metric just
+            // stops advancing until the process restarts, which is the
+            // safer failure mode for an observability gauge.
+            if let Ok(mut clock) = last_commit_advance.lock() {
+                *clock = Instant::now();
+            }
             Ok(true)
         } else {
             Ok(false)
@@ -280,6 +307,7 @@ impl CommandSubmitter {
                 replicator,
                 db,
                 last_applied_op,
+                last_commit_advance,
             } => {
                 let mut repl = replicator
                     .write()
@@ -325,7 +353,13 @@ impl CommandSubmitter {
                 // into the installed `CommandRouter`.
                 if !result.was_duplicate {
                     let op = result.op_number.as_u64();
-                    Self::apply_once_to_projection(last_applied_op, db, op, &command)?;
+                    Self::apply_once_to_projection(
+                        last_applied_op,
+                        last_commit_advance,
+                        db,
+                        op,
+                        &command,
+                    )?;
                 }
 
                 Ok(SubmissionResult {
@@ -347,10 +381,17 @@ impl CommandSubmitter {
         rx: std::sync::mpsc::Receiver<AppliedCommand>,
         db: Kimberlite,
         last_applied: Arc<Mutex<u64>>,
+        last_commit_advance: Arc<Mutex<Instant>>,
     ) {
         while let Ok(commit) = rx.recv() {
             let op = commit.op.as_u64();
-            let result = Self::apply_once_to_projection(&last_applied, &db, op, &commit.command);
+            let result = Self::apply_once_to_projection(
+                &last_applied,
+                &last_commit_advance,
+                &db,
+                op,
+                &commit.command,
+            );
             if let Err(e) = result {
                 // Projection apply failing is usually a genuine data
                 // error (e.g. duplicate StreamId) we've already
@@ -386,6 +427,7 @@ impl CommandSubmitter {
                 replicator,
                 db,
                 last_applied_op,
+                last_commit_advance,
             } => {
                 let mut repl = replicator
                     .write()
@@ -416,7 +458,13 @@ impl CommandSubmitter {
                     let op = result.op_number.as_u64();
                     // Same dedup-gated apply as `submit_with_idempotency`
                     // — see that comment for the full rationale.
-                    Self::apply_once_to_projection(last_applied_op, db, op, &command)?;
+                    Self::apply_once_to_projection(
+                        last_applied_op,
+                        last_commit_advance,
+                        db,
+                        op,
+                        &command,
+                    )?;
                 }
 
                 Ok(SubmissionResult {
@@ -479,6 +527,7 @@ impl CommandSubmitter {
                 connected_peers: None,
                 bootstrap_complete: None,
                 replica_status: None,
+                commit_lag_seconds: None,
             },
             Self::SingleNode { replicator, .. } => {
                 let repl = replicator.read().ok();
@@ -496,13 +545,33 @@ impl CommandSubmitter {
                     connected_peers: Some(0), // No peers in single-node
                     bootstrap_complete: Some(true), // Always complete
                     replica_status: Some("normal"),
+                    // Single-node always commits locally, so lag is 0.
+                    commit_lag_seconds: Some(0.0),
                 }
             }
-            Self::Cluster { replicator, .. } => {
+            Self::Cluster {
+                replicator,
+                last_commit_advance,
+                ..
+            } => {
                 let repl = replicator.read().ok();
+                let is_leader_now = repl.as_ref().is_some_and(|r| r.is_leader());
+                // Leaders commit locally on every submit; surface 0 so
+                // dashboards don't false-page on a healthy leader.
+                // Followers compute (now - last apply); see the field
+                // doc on `ReplicationStatus::commit_lag_seconds` for
+                // the steady-state vs idle-cluster caveat.
+                let lag = if is_leader_now {
+                    Some(0.0)
+                } else {
+                    last_commit_advance
+                        .lock()
+                        .ok()
+                        .map(|t| t.elapsed().as_secs_f64())
+                };
                 ReplicationStatus {
                     mode: "cluster",
-                    is_leader: repl.as_ref().is_some_and(|r| r.is_leader()),
+                    is_leader: is_leader_now,
                     replica_id: repl
                         .as_ref()
                         .and_then(|r| r.config().replicas().next().map(|id| id.as_u8())),
@@ -523,6 +592,7 @@ impl CommandSubmitter {
                         kimberlite_vsr::ReplicaStatus::Recovering => "recovering",
                         kimberlite_vsr::ReplicaStatus::Standby => "standby",
                     }),
+                    commit_lag_seconds: lag,
                 }
             }
         }
@@ -627,6 +697,12 @@ pub struct ReplicationStatus {
     /// cluster mode only. Chaos probes gate commit-hash compares on this
     /// to avoid racing a view change.
     pub replica_status: Option<&'static str>,
+    /// Seconds since this replica's `commit_number` last advanced
+    /// (cluster mode only). 0 on the leader (writes commit immediately
+    /// here); on followers it's a coarse "how far behind the leader
+    /// am I" signal — accurate when the cluster has steady write
+    /// traffic, conservative-overestimate (drifts up) in idle clusters.
+    pub commit_lag_seconds: Option<f64>,
 }
 
 #[cfg(test)]

@@ -18,6 +18,54 @@ user-facing narrative.
 _Accretion slot for v0.9.0 work. See [`ROADMAP.md`](./ROADMAP.md)
 for planned scope._
 
+### Added — v0.9.x cluster graduation T1.2
+
+- **`/healthz` and `/readyz` Kubernetes-convention HTTP probes.** New
+  routes on the existing `kimberlite-server` HTTP sidecar (cluster
+  mode default port `data_port + 1000`); the legacy `/health` and
+  `/ready` paths remain as back-compat aliases. `/healthz` is
+  unconditionally 200 once the process is up; `/readyz` is 200 only
+  when the existing disk + memory checks pass AND (in replicated
+  mode) VSR has completed bootstrap, the local replica is in `Normal`
+  status, and `commit_lag_seconds` is below `--max-replication-lag`
+  (default 5 s). Returns `503 Service Unavailable` otherwise.
+- **Four new Prometheus gauges in `/metrics`** (per the cluster
+  graduation plan's T1.2 acceptance bullet):
+  `kimberlite_committed_offset`, `kimberlite_view_number`,
+  `kimberlite_is_leader`, `kimberlite_replication_lag_seconds`. All
+  refreshed at scrape time from a fresh `ReplicationStatus` snapshot
+  via the new `Metrics::sync_replication_status` helper, so each
+  scrape sees current values without a periodic background tick.
+- **`CommandSubmitter::Cluster` tracks `last_commit_advance`.**
+  Updated inside the dedup-gated `apply_once_to_projection` helper,
+  which both the leader's inline submit and the follower projection
+  applier already use; `kimberlite_replication_lag_seconds` reads
+  `now - last_commit_advance` for followers (0 on the leader).
+- **`HealthChecker::with_submitter` and `with_max_replication_lag`
+  builder methods.** `Server::new` constructs the submitter first
+  (reordered) and passes it via `Arc::clone` so the readiness check
+  can incorporate VSR status; existing `HealthChecker::new(data_dir)`
+  call sites stay source-compatible.
+- **New integration test `crates/kimberlite-cluster/tests/http_probes.rs`.**
+  `#[ignore]`d by default; run with
+  `cargo test -p kimberlite-cluster --test http_probes -- --ignored`.
+  Boots a 3-node cluster, asserts each replica's `/healthz`,
+  `/readyz`, `/metrics` return 200, and that the four T1.2 gauges
+  appear in the Prometheus output. 5/5 soak.
+
+### Fixed — `/metrics` (and any large HTTP sidecar response) silently RST'd
+
+The HTTP sidecar accepts on a `mio::net::TcpListener`, so accepted
+streams are non-blocking. `std::io::Write::write_all` errors on the
+first `WouldBlock`; dropping the stream then sends a TCP RST that
+surfaces to clients as `Connection reset by peer`. Small responses
+(under one TCP packet — `/health`, `/ready`) always fit, so the bug
+never tripped them; `/metrics`, with its multi-KB Prometheus output,
+reliably broke. Pre-existing latent bug surfaced while building T1.2's
+integration test. Fix: new `write_full_response` helper that retries
+on `WouldBlock` with brief sleeps until a 5 s deadline.
+(`crates/kimberlite-server/src/http.rs`)
+
 ### Added — v0.9.x cluster graduation T1.1
 
 - **`kimberlite-cluster` supervisor spawns real `kimberlite start`
