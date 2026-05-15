@@ -1,0 +1,19 @@
+[package]
+name = "kimberlite-fhir"
+description = "FHIR R4 typed resource model with canonical-JSON fidelity for Kimberlite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

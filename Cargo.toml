@@ -39,6 +39,7 @@ members = [
     "crates/kimberlite-io",
     "crates/kimberlite-oracle",
     "crates/kimberlite-test-harness",
+    "crates/kimberlite-fhir",
 ]
 exclude = ["fuzz", "examples/rust"]
 default-members = ["crates/kimberlite"]
