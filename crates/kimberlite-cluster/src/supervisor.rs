@@ -157,6 +157,44 @@ impl ClusterSupervisor {
     pub fn config(&self) -> &ClusterConfig {
         &self.config
     }
+
+    /// Borrows a managed node by id.
+    ///
+    /// Used by integration tests that need to inspect the live process
+    /// (e.g. read its PID before sending a signal, or read `restart_count`
+    /// to verify supervisor recovery).
+    pub fn node(&self, id: usize) -> Option<&NodeProcess> {
+        self.nodes.get(&id)
+    }
+
+    /// Mutably borrows a managed node by id.
+    ///
+    /// Same use-case as [`Self::node`], but for tests that need to call
+    /// out-of-band operations like [`NodeProcess::force_kill`].
+    pub fn node_mut(&mut self, id: usize) -> Option<&mut NodeProcess> {
+        self.nodes.get_mut(&id)
+    }
+
+    /// Drives one supervision pass: marks any non-alive `Running` node as
+    /// `Crashed`, then restarts crashed nodes with bounded backoff.
+    ///
+    /// This is the same body the `monitor_loop` runs each tick, exposed
+    /// as a one-shot so integration tests can step the supervisor
+    /// deterministically (no race against the monitor's 1-second cadence).
+    pub async fn supervise_once(&mut self) {
+        for (id, node) in &mut self.nodes {
+            if node.status == NodeStatus::Running && !node.is_alive() {
+                eprintln!("Node {id} crashed, attempting restart...");
+                node.status = NodeStatus::Crashed;
+
+                if let Err(e) = node.restart().await {
+                    eprintln!("Failed to restart node {id}: {e}");
+                } else {
+                    println!("Node {id} restarted successfully");
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

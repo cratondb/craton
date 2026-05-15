@@ -28,6 +28,9 @@ kimberlite-types = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# Integration test (`tests/three_node_smoke.rs`) connects to spawned
+# nodes via the wire protocol and writes/reads a real event.
+kimberlite-client = { workspace = true }
 
 [package.metadata.cargo-machete]
 # Used in node management and error handling (stub implementation)

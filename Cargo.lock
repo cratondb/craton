@@ -3050,6 +3050,7 @@ name = "kimberlite-cluster"
 version = "0.8.0"
 dependencies = [
  "anyhow",
+ "kimberlite-client",
  "kimberlite-types",
  "serde",
  "tempfile",
