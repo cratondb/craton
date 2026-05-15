@@ -1,10 +1,23 @@
 //! Unit tests for kmb-types
 
 use crate::{
-    AppliedIndex, Checkpoint, CheckpointPolicy, Generation, GroupId, HASH_LENGTH, Hash,
+    AppliedIndex, Checkpoint, CheckpointPolicy, DataClass, Generation, GroupId, HASH_LENGTH, Hash,
     IDEMPOTENCY_ID_LENGTH, IdempotencyId, Offset, RecordHeader, RecordKind, RecoveryReason,
     RecoveryRecord, Region, StreamId, StreamName, TenantId, Timestamp,
 };
+
+// ============================================================================
+// DataClass Default — healthcare-first defaults assertion
+// ============================================================================
+
+#[test]
+fn data_class_default_is_phi() {
+    // Sprint 2 (healthcare-only pivot): any stream created without an
+    // explicit classification is treated as PHI. Regressing this default
+    // back to `Confidential` or `Public` would silently weaken HIPAA
+    // posture on new streams — fail loud here so the change is intentional.
+    assert_eq!(DataClass::default(), DataClass::PHI);
+}
 
 // ============================================================================
 // ID Type Tests

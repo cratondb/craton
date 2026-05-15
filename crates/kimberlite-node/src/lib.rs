@@ -386,6 +386,12 @@ pub enum JsConsentPurpose {
     PublicTask,
     Research,
     Security,
+    // HIPAA TPO + extensions
+    Treatment,
+    Payment,
+    Operations,
+    PublicHealth,
+    Emergency,
 }
 
 #[napi(string_enum)]
@@ -473,6 +479,11 @@ fn js_purpose_to_wire(p: JsConsentPurpose) -> WireConsentPurpose {
         JsConsentPurpose::PublicTask => WireConsentPurpose::PublicTask,
         JsConsentPurpose::Research => WireConsentPurpose::Research,
         JsConsentPurpose::Security => WireConsentPurpose::Security,
+        JsConsentPurpose::Treatment => WireConsentPurpose::Treatment,
+        JsConsentPurpose::Payment => WireConsentPurpose::Payment,
+        JsConsentPurpose::Operations => WireConsentPurpose::Operations,
+        JsConsentPurpose::PublicHealth => WireConsentPurpose::PublicHealth,
+        JsConsentPurpose::Emergency => WireConsentPurpose::Emergency,
     }
 }
 
@@ -486,6 +497,11 @@ fn wire_purpose_to_js(p: WireConsentPurpose) -> JsConsentPurpose {
         WireConsentPurpose::PublicTask => JsConsentPurpose::PublicTask,
         WireConsentPurpose::Research => JsConsentPurpose::Research,
         WireConsentPurpose::Security => JsConsentPurpose::Security,
+        WireConsentPurpose::Treatment => JsConsentPurpose::Treatment,
+        WireConsentPurpose::Payment => JsConsentPurpose::Payment,
+        WireConsentPurpose::Operations => JsConsentPurpose::Operations,
+        WireConsentPurpose::PublicHealth => JsConsentPurpose::PublicHealth,
+        WireConsentPurpose::Emergency => JsConsentPurpose::Emergency,
     }
 }
 

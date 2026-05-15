@@ -2586,6 +2586,11 @@ fn wire_to_native_purpose(purpose: WireConsentPurpose) -> kimberlite_compliance:
         WireConsentPurpose::PublicTask => Purpose::PublicTask,
         WireConsentPurpose::Research => Purpose::Research,
         WireConsentPurpose::Security => Purpose::Security,
+        WireConsentPurpose::Treatment => Purpose::Treatment,
+        WireConsentPurpose::Payment => Purpose::Payment,
+        WireConsentPurpose::Operations => Purpose::Operations,
+        WireConsentPurpose::PublicHealth => Purpose::PublicHealth,
+        WireConsentPurpose::Emergency => Purpose::Emergency,
     }
 }
 
@@ -2600,6 +2605,11 @@ fn native_to_wire_purpose(p: kimberlite_compliance::purpose::Purpose) -> WireCon
         Purpose::PublicTask => WireConsentPurpose::PublicTask,
         Purpose::Research => WireConsentPurpose::Research,
         Purpose::Security => WireConsentPurpose::Security,
+        Purpose::Treatment => WireConsentPurpose::Treatment,
+        Purpose::Payment => WireConsentPurpose::Payment,
+        Purpose::Operations => WireConsentPurpose::Operations,
+        Purpose::PublicHealth => WireConsentPurpose::PublicHealth,
+        Purpose::Emergency => WireConsentPurpose::Emergency,
     }
 }
 

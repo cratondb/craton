@@ -259,6 +259,40 @@ fn payload_values(a: &ComplianceAuditAction) -> Vec<String> {
             signer_id,
             meaning,
         } => vec![record_id.clone(), signer_id.clone(), meaning.clone()],
+        ComplianceAuditAction::BreakGlassActivated {
+            user_id,
+            patient_id,
+            reason,
+            approval_chain,
+            activated_at,
+        } => {
+            let mut v = vec![
+                user_id.clone(),
+                patient_id.clone(),
+                reason.clone(),
+                activated_at.to_rfc3339(),
+            ];
+            v.extend(approval_chain.iter().cloned());
+            v
+        }
+        ComplianceAuditAction::BreakGlassClosed {
+            user_id,
+            patient_id,
+            activated_at,
+            closed_at,
+            accessed_resources,
+            duration_seconds,
+        } => {
+            let mut v = vec![
+                user_id.clone(),
+                patient_id.clone(),
+                activated_at.to_rfc3339(),
+                closed_at.to_rfc3339(),
+                duration_seconds.to_string(),
+            ];
+            v.extend(accessed_resources.iter().cloned());
+            v
+        }
     }
 }
 

@@ -1,6 +1,16 @@
-//! GDPR Article 6 Purpose Limitation
+//! Purpose limitation for personal data processing.
 //!
-//! This module implements purpose limitation for personal data processing under GDPR.
+//! Two regimes share this surface:
+//!
+//! - **HIPAA TPO + extensions** — `Treatment`, `Payment`, `Operations`,
+//!   `PublicHealth`, `Emergency`. The canonical purposes a PHI access
+//!   request can be tagged with at query time (45 CFR § 164.502, § 164.506,
+//!   § 164.512). Healthcare purpose-of-use enforcement gates queries
+//!   on these variants.
+//! - **GDPR Article 6** — `Marketing`, `Analytics`, `Contractual`,
+//!   `LegalObligation`, `VitalInterests`, `PublicTask`, `Research`,
+//!   `Security`. Lawful-basis tracking for international healthcare /
+//!   non-PHI personal data.
 //!
 //! # GDPR Requirements
 //!
@@ -94,12 +104,60 @@ pub enum Purpose {
     /// Fraud prevention and security
     /// **Lawful basis:** Article 6(1)(f) - Legitimate interest
     Security,
+
+    // ========================================================================
+    // HIPAA TPO + extensions (45 CFR § 164.506, § 164.512)
+    // ========================================================================
+    /// Direct patient care — examination, diagnosis, prescription, referral.
+    /// **HIPAA basis:** § 164.506(c)(2) — Treatment (T of TPO).
+    /// **Consent:** Not required for TPO; covered by the NPP.
+    Treatment,
+
+    /// Billing, claims adjudication, reimbursement, eligibility — RCM and payer
+    /// workflows.
+    /// **HIPAA basis:** § 164.506(c)(3) — Payment (P of TPO).
+    Payment,
+
+    /// Quality improvement, credentialing, training, accreditation, business
+    /// management.
+    /// **HIPAA basis:** § 164.506(c)(4) — Health-care Operations (O of TPO).
+    Operations,
+
+    /// Public-health surveillance, reportable disease notification, vital
+    /// statistics, FDA adverse-event reporting.
+    /// **HIPAA basis:** § 164.512(b) — Uses and disclosures for public-health
+    /// activities.
+    PublicHealth,
+
+    /// Emergency treatment when consent cannot reasonably be obtained — the
+    /// break-glass purpose. Pairs with the `BreakGlassActivated` audit event.
+    /// **HIPAA basis:** § 164.510(b)(3) — Emergency situations / § 164.512(j)
+    /// (avert serious threat).
+    Emergency,
 }
 
 impl Purpose {
-    /// Check if this purpose requires explicit consent (Article 7)
+    /// Check if this purpose requires explicit consent (GDPR Article 7 / HIPAA Authorization).
+    ///
+    /// HIPAA TPO (Treatment/Payment/Operations) does NOT require separate
+    /// consent — it is covered by the Notice of Privacy Practices. Public
+    /// health and emergency uses are explicitly exempted from authorization.
     pub fn requires_consent(&self) -> bool {
         matches!(self, Purpose::Marketing | Purpose::Research)
+    }
+
+    /// Whether this purpose is one of the HIPAA TPO categories or its
+    /// healthcare extensions. Healthcare purpose-of-use enforcement at
+    /// query time should constrain to this set when the stream is `PHI`.
+    pub fn is_healthcare(&self) -> bool {
+        matches!(
+            self,
+            Purpose::Treatment
+                | Purpose::Payment
+                | Purpose::Operations
+                | Purpose::PublicHealth
+                | Purpose::Emergency
+        )
     }
 
     /// Check if this purpose is valid for a given data class
@@ -113,6 +171,12 @@ impl Purpose {
             (Purpose::LegalObligation, DataClass::PHI) => true, // Reporting requirements
             (Purpose::VitalInterests, DataClass::PHI) => true, // Medical emergencies
             (Purpose::Security, DataClass::PHI) => true,   // Fraud prevention
+            // HIPAA TPO + extensions are the canonical PHI purposes
+            (Purpose::Treatment, DataClass::PHI) => true,
+            (Purpose::Payment, DataClass::PHI) => true,
+            (Purpose::Operations, DataClass::PHI) => true,
+            (Purpose::PublicHealth, DataClass::PHI) => true,
+            (Purpose::Emergency, DataClass::PHI) => true,
 
             // Deidentified data - Less restrictive
             (_, DataClass::Deidentified) => true,
@@ -164,10 +228,25 @@ impl Purpose {
 
             // PublicTask only valid for government/public entities
             (Purpose::PublicTask, _) => true,
+
+            // Healthcare TPO + extensions — only PII / Sensitive remain
+            // (PHI explicit above; PCI/Financial/Confidential/Public
+            // already caught by their class-wide arms). All HIPAA
+            // purposes are allowed on non-PHI patient data: billing
+            // addresses (Payment + PII), genetic data in research
+            // (Operations + Sensitive), etc.
+            (
+                Purpose::Treatment
+                | Purpose::Payment
+                | Purpose::Operations
+                | Purpose::PublicHealth
+                | Purpose::Emergency,
+                _,
+            ) => true,
         }
     }
 
-    /// Get the GDPR Article 6 lawful basis
+    /// Get the GDPR Article 6 lawful basis or HIPAA section for healthcare purposes.
     pub fn lawful_basis(&self) -> &'static str {
         match self {
             Purpose::Marketing => "Article 6(1)(a) - Consent",
@@ -178,6 +257,11 @@ impl Purpose {
             Purpose::PublicTask => "Article 6(1)(e) - Public task",
             Purpose::Research => "Article 6(1)(f) or Article 9(2)(j) - Research",
             Purpose::Security => "Article 6(1)(f) - Legitimate interest",
+            Purpose::Treatment => "HIPAA § 164.506(c)(2) - Treatment (TPO)",
+            Purpose::Payment => "HIPAA § 164.506(c)(3) - Payment (TPO)",
+            Purpose::Operations => "HIPAA § 164.506(c)(4) - Health-care Operations (TPO)",
+            Purpose::PublicHealth => "HIPAA § 164.512(b) - Public-health activities",
+            Purpose::Emergency => "HIPAA § 164.510(b)(3) / § 164.512(j) - Emergency",
         }
     }
 
@@ -201,7 +285,7 @@ impl Purpose {
         }
     }
 
-    /// All valid purposes
+    /// All valid purposes (GDPR + HIPAA TPO).
     pub fn all() -> &'static [Purpose] {
         &[
             Purpose::Marketing,
@@ -212,6 +296,11 @@ impl Purpose {
             Purpose::PublicTask,
             Purpose::Research,
             Purpose::Security,
+            Purpose::Treatment,
+            Purpose::Payment,
+            Purpose::Operations,
+            Purpose::PublicHealth,
+            Purpose::Emergency,
         ]
     }
 }
@@ -227,6 +316,11 @@ impl std::fmt::Display for Purpose {
             Purpose::PublicTask => write!(f, "Public Task"),
             Purpose::Research => write!(f, "Research"),
             Purpose::Security => write!(f, "Security"),
+            Purpose::Treatment => write!(f, "Treatment"),
+            Purpose::Payment => write!(f, "Payment"),
+            Purpose::Operations => write!(f, "Operations"),
+            Purpose::PublicHealth => write!(f, "Public Health"),
+            Purpose::Emergency => write!(f, "Emergency"),
         }
     }
 }
@@ -318,9 +412,52 @@ mod tests {
     #[test]
     fn test_all_purposes() {
         let purposes = Purpose::all();
-        assert_eq!(purposes.len(), 8);
+        assert_eq!(purposes.len(), 13);
         assert!(purposes.contains(&Purpose::Marketing));
         assert!(purposes.contains(&Purpose::Security));
+        assert!(purposes.contains(&Purpose::Treatment));
+        assert!(purposes.contains(&Purpose::Emergency));
+    }
+
+    #[test]
+    fn test_hipaa_tpo_for_phi() {
+        for p in [
+            Purpose::Treatment,
+            Purpose::Payment,
+            Purpose::Operations,
+            Purpose::PublicHealth,
+            Purpose::Emergency,
+        ] {
+            assert!(p.is_valid_for(DataClass::PHI), "{p:?} must be valid for PHI");
+            assert!(p.is_healthcare());
+        }
+    }
+
+    #[test]
+    fn test_hipaa_tpo_does_not_require_consent() {
+        for p in [Purpose::Treatment, Purpose::Payment, Purpose::Operations] {
+            assert!(
+                !p.requires_consent(),
+                "HIPAA TPO purpose {p:?} should not require separate consent"
+            );
+        }
+    }
+
+    #[test]
+    fn test_payment_purpose_classes() {
+        // Payment is valid for the PHI/PII classes a healthcare billing
+        // workflow touches. Financial/Confidential are PCI/SOX/general
+        // business classes and are blocked by their class-wide arms.
+        assert!(Purpose::Payment.is_valid_for(DataClass::PHI));
+        assert!(Purpose::Payment.is_valid_for(DataClass::PII));
+        assert!(!Purpose::Payment.is_valid_for(DataClass::Financial));
+        assert!(!Purpose::Payment.is_valid_for(DataClass::Confidential));
+    }
+
+    #[test]
+    fn test_emergency_lawful_basis_is_hipaa() {
+        assert!(Purpose::Emergency.lawful_basis().contains("HIPAA"));
+        assert!(Purpose::Treatment.lawful_basis().contains("HIPAA"));
     }
 
     #[test]

@@ -608,7 +608,12 @@ pub struct ServerInfoResponse {
 // ============================================================================
 
 /// Purposes a subject can grant consent for. Mirrors
-/// `kimberlite_compliance::purpose::Purpose`.
+/// `kimberlite_compliance::purpose::Purpose`. The five `Treatment`,
+/// `Payment`, `Operations`, `PublicHealth`, `Emergency` variants are
+/// HIPAA TPO + extensions — added when the database focused on
+/// healthcare; pre-existing wire payloads (which only use the GDPR
+/// variants) round-trip unchanged because postcard variant tags are
+/// append-only.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConsentPurpose {
     Marketing,
@@ -619,6 +624,11 @@ pub enum ConsentPurpose {
     PublicTask,
     Research,
     Security,
+    Treatment,
+    Payment,
+    Operations,
+    PublicHealth,
+    Emergency,
 }
 
 /// Scope of a consent grant. Mirrors

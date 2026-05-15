@@ -1145,6 +1145,19 @@ pub enum DataClass {
     Public,
 }
 
+impl Default for DataClass {
+    /// Healthcare-first default: any stream created without an explicit
+    /// classification is treated as PHI. This is the opinionated stance
+    /// of a healthcare database — if you don't know what's in a stream,
+    /// assume the worst for compliance purposes (HIPAA-restricted, 6-year
+    /// retention, audit-required, encryption-required).
+    ///
+    /// Callers that genuinely hold non-PHI data must declare it explicitly.
+    fn default() -> Self {
+        Self::PHI
+    }
+}
+
 // ============================================================================
 // Placement - Clone (Region::Custom contains String)
 // ============================================================================

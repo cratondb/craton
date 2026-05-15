@@ -37,6 +37,35 @@ pub enum RetentionError {
 
 pub type Result<T> = std::result::Result<T, RetentionError>;
 
+/// HIPAA-mandated minimum retention for audit logs themselves:
+/// 6 years from the date of creation OR the date when last in effect,
+/// whichever is later (45 CFR § 164.530(j)(2)).
+///
+/// This is distinct from data retention — even after the underlying
+/// PHI has been deleted under its own retention rules, the audit log
+/// recording who accessed it must persist.
+pub const HIPAA_AUDIT_LOG_MIN_DAYS: u32 = 2_190;
+
+/// Kind of stream — drives whether `RetentionPolicy::for_audit_log()` or
+/// `RetentionPolicy::from_data_class()` applies. The two classes can
+/// have different minimum retention, and audit-log streams are exempt
+/// from GDPR storage-limitation deletion when the action they log is
+/// itself an audit-required event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamKind {
+    /// Application data stream — retention derived from `DataClass`.
+    Data,
+    /// Append-only audit log stream — retention is HIPAA §164.530(j)(2)
+    /// regardless of the data class of the resources it references.
+    AuditLog,
+}
+
+impl Default for StreamKind {
+    fn default() -> Self {
+        Self::Data
+    }
+}
+
 /// Retention policy for a stream.
 #[derive(Debug, Clone)]
 pub struct RetentionPolicy {
@@ -50,6 +79,9 @@ pub struct RetentionPolicy {
     pub legal_hold: bool,
     /// Reason for legal hold (for audit trail).
     pub hold_reason: Option<String>,
+    /// What kind of stream this policy applies to. Audit-log streams
+    /// have HIPAA's 6-year minimum independent of the data class.
+    pub stream_kind: StreamKind,
 }
 
 impl RetentionPolicy {
@@ -62,16 +94,34 @@ impl RetentionPolicy {
             max_retention_days: classification::max_retention_days(data_class),
             legal_hold: false,
             hold_reason: None,
+            stream_kind: StreamKind::Data,
         }
     }
 
-    /// Creates a custom retention policy.
+    /// Retention policy for an audit-log stream — HIPAA § 164.530(j)(2)
+    /// mandates a 6-year minimum *for the audit log itself*, regardless
+    /// of the retention applied to the data it references. The policy
+    /// has no max_retention because audit logs are never automatically
+    /// deleted; storage-limitation requests against an audit-log stream
+    /// must be reviewed manually.
+    pub fn for_audit_log() -> Self {
+        Self {
+            min_retention_days: Some(HIPAA_AUDIT_LOG_MIN_DAYS),
+            max_retention_days: None,
+            legal_hold: false,
+            hold_reason: None,
+            stream_kind: StreamKind::AuditLog,
+        }
+    }
+
+    /// Creates a custom retention policy (data-class kind).
     pub fn custom(min_days: Option<u32>, max_days: Option<u32>) -> Self {
         Self {
             min_retention_days: min_days,
             max_retention_days: max_days,
             legal_hold: false,
             hold_reason: None,
+            stream_kind: StreamKind::Data,
         }
     }
 
@@ -80,6 +130,11 @@ impl RetentionPolicy {
         self.legal_hold = true;
         self.hold_reason = Some(reason);
         self
+    }
+
+    /// Whether this policy describes an audit-log stream.
+    pub fn is_audit_log(&self) -> bool {
+        matches!(self.stream_kind, StreamKind::AuditLog)
     }
 }
 
@@ -169,6 +224,24 @@ impl RetentionEnforcer {
             stream_id,
             TrackedStream {
                 created_at,
+                data_class,
+                policy,
+            },
+        );
+    }
+
+    /// Registers an audit-log stream. Audit logs retain for 6 years
+    /// (HIPAA § 164.530(j)(2)) independent of the data class of the
+    /// resources they reference. The `data_class` parameter records
+    /// the highest sensitivity of resources logged (typically PHI)
+    /// for reporting purposes; it does not influence the retention
+    /// duration on an audit-log stream.
+    pub fn register_audit_log_stream(&mut self, stream_id: u64, data_class: DataClass) {
+        let policy = RetentionPolicy::for_audit_log();
+        self.streams.insert(
+            stream_id,
+            TrackedStream {
+                created_at: SystemTime::now(),
                 data_class,
                 policy,
             },
@@ -506,5 +579,43 @@ mod tests {
         let stored_policy = enforcer.get_policy(1).unwrap();
         assert_eq!(stored_policy.min_retention_days, Some(90));
         assert_eq!(stored_policy.max_retention_days, Some(365));
+    }
+
+    #[test]
+    fn test_audit_log_policy_uses_hipaa_min() {
+        let policy = RetentionPolicy::for_audit_log();
+        assert_eq!(policy.min_retention_days, Some(HIPAA_AUDIT_LOG_MIN_DAYS));
+        assert_eq!(policy.min_retention_days, Some(2_190));
+        assert_eq!(policy.max_retention_days, None);
+        assert!(policy.is_audit_log());
+        assert_eq!(policy.stream_kind, StreamKind::AuditLog);
+    }
+
+    #[test]
+    fn test_data_class_policy_is_not_audit_log() {
+        let policy = RetentionPolicy::from_data_class(DataClass::PHI);
+        assert!(!policy.is_audit_log());
+        assert_eq!(policy.stream_kind, StreamKind::Data);
+    }
+
+    #[test]
+    fn test_register_audit_log_stream_blocks_early_deletion() {
+        let mut enforcer = RetentionEnforcer::new();
+        enforcer.register_audit_log_stream(42, DataClass::PHI);
+        let result = enforcer.can_delete(42);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            RetentionError::MinimumRetentionNotMet { min_days: 2_190, .. }
+        ));
+    }
+
+    #[test]
+    fn test_audit_log_retention_independent_of_data_class() {
+        // Even a Public-class audit log stream retains for 6 years.
+        let mut enforcer = RetentionEnforcer::new();
+        enforcer.register_audit_log_stream(42, DataClass::Public);
+        let policy = enforcer.get_policy(42).unwrap();
+        assert_eq!(policy.min_retention_days, Some(HIPAA_AUDIT_LOG_MIN_DAYS));
     }
 }

@@ -1565,6 +1565,11 @@ fn parse_consent_purpose(s: &str) -> Option<WireConsentPurpose> {
         "PublicTask" => WireConsentPurpose::PublicTask,
         "Research" => WireConsentPurpose::Research,
         "Security" => WireConsentPurpose::Security,
+        "Treatment" => WireConsentPurpose::Treatment,
+        "Payment" => WireConsentPurpose::Payment,
+        "Operations" => WireConsentPurpose::Operations,
+        "PublicHealth" => WireConsentPurpose::PublicHealth,
+        "Emergency" => WireConsentPurpose::Emergency,
         _ => return None,
     })
 }

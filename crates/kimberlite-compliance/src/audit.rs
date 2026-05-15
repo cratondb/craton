@@ -201,6 +201,35 @@ pub enum ComplianceAuditAction {
         signer_id: String,
         meaning: String,
     },
+
+    // -- Break-glass emergency access (HIPAA § 164.510(b)(3) / § 164.312(a)(2)(ii)) --
+    /// Emergency-override access to PHI was activated. The user attests
+    /// that consent could not reasonably be obtained at the moment of
+    /// care. The reason is mandatory free-text; `approval_chain` is the
+    /// ordered list of authorising actors (operator → on-call manager →
+    /// privacy officer, etc.). The event is the *opening* of a session;
+    /// every resource touched inside it should eventually appear in the
+    /// paired `BreakGlassClosed` event.
+    BreakGlassActivated {
+        user_id: String,
+        patient_id: String,
+        reason: String,
+        approval_chain: Vec<String>,
+        activated_at: DateTime<Utc>,
+    },
+    /// A break-glass session was closed. `accessed_resources` enumerates
+    /// every PHI resource read while the override was active —
+    /// regulators and the patient's covered entity inspect this list as
+    /// part of post-hoc review. `duration_seconds` is the wall-clock
+    /// length of the session.
+    BreakGlassClosed {
+        user_id: String,
+        patient_id: String,
+        activated_at: DateTime<Utc>,
+        closed_at: DateTime<Utc>,
+        accessed_resources: Vec<String>,
+        duration_seconds: u64,
+    },
 }
 
 impl ComplianceAuditAction {
@@ -220,6 +249,7 @@ impl ComplianceAuditAction {
             Self::PolicyChanged { .. } => "PolicyChanged",
             Self::TokenizationApplied { .. } => "Tokenization",
             Self::RecordSigned { .. } => "RecordSigned",
+            Self::BreakGlassActivated { .. } | Self::BreakGlassClosed { .. } => "BreakGlass",
         }
     }
 
@@ -246,6 +276,8 @@ impl ComplianceAuditAction {
             Self::PolicyChanged { .. } => "PolicyChanged",
             Self::TokenizationApplied { .. } => "TokenizationApplied",
             Self::RecordSigned { .. } => "RecordSigned",
+            Self::BreakGlassActivated { .. } => "BreakGlassActivated",
+            Self::BreakGlassClosed { .. } => "BreakGlassClosed",
         }
     }
 
@@ -290,6 +322,21 @@ impl ComplianceAuditAction {
             Self::PolicyChanged { .. } => &["policy_type", "changed_by", "details"],
             Self::TokenizationApplied { .. } => &["column", "token_format", "record_count"],
             Self::RecordSigned { .. } => &["record_id", "signer_id", "meaning"],
+            Self::BreakGlassActivated { .. } => &[
+                "user_id",
+                "patient_id",
+                "reason",
+                "approval_chain",
+                "activated_at",
+            ],
+            Self::BreakGlassClosed { .. } => &[
+                "user_id",
+                "patient_id",
+                "activated_at",
+                "closed_at",
+                "accessed_resources",
+                "duration_seconds",
+            ],
         };
         names.iter().map(|s| (*s).to_string()).collect()
     }
@@ -335,6 +382,19 @@ impl ComplianceAuditAction {
             | Self::BreachResolved {
                 affected_subjects, ..
             } => affected_subjects.iter().any(|s| s.as_str() == subject_id),
+
+            // Break-glass events match either the activating user OR
+            // the patient subject — both are forensically relevant.
+            Self::BreakGlassActivated {
+                user_id,
+                patient_id,
+                ..
+            }
+            | Self::BreakGlassClosed {
+                user_id,
+                patient_id,
+                ..
+            } => user_id == subject_id || patient_id == subject_id,
 
             // Actions without subject identifiers
             Self::FieldMasked { .. } | Self::TokenizationApplied { .. } => false,
@@ -658,6 +718,10 @@ fn subject_id_of(a: &ComplianceAuditAction) -> Option<String> {
         ComplianceAuditAction::AccessGranted { user_id, .. }
         | ComplianceAuditAction::AccessDenied { user_id, .. } => Some(user_id.clone()),
         ComplianceAuditAction::RecordSigned { signer_id, .. } => Some(signer_id.clone()),
+        // Break-glass subject is the patient whose PHI was touched —
+        // the activating user is captured as the actor.
+        ComplianceAuditAction::BreakGlassActivated { patient_id, .. }
+        | ComplianceAuditAction::BreakGlassClosed { patient_id, .. } => Some(patient_id.clone()),
         ComplianceAuditAction::FieldMasked { .. }
         | ComplianceAuditAction::PolicyChanged { .. }
         | ComplianceAuditAction::BreachDetected { .. }
@@ -981,6 +1045,18 @@ impl ComplianceAuditLog {
                 kimberlite_properties::reached!(
                     "compliance.audit.record_signed",
                     "audit log records a RecordSigned event"
+                );
+            }
+            ComplianceAuditAction::BreakGlassActivated { .. } => {
+                kimberlite_properties::reached!(
+                    "compliance.audit.break_glass_activated",
+                    "audit log records a BreakGlassActivated event"
+                );
+            }
+            ComplianceAuditAction::BreakGlassClosed { .. } => {
+                kimberlite_properties::reached!(
+                    "compliance.audit.break_glass_closed",
+                    "audit log records a BreakGlassClosed event"
                 );
             }
         }
