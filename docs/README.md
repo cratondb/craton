@@ -7,11 +7,11 @@ order: 0
 
 # Kimberlite Documentation
 
-Welcome to Kimberlite, a **compliance-first database for regulated industries**. This documentation follows a progressive disclosure model to help you find what you need quickly.
+Welcome to Kimberlite, a **verifiable database for healthcare**. This documentation follows a progressive disclosure model to help you find what you need quickly.
 
 ## What is Kimberlite?
 
-Kimberlite is built for industries where data integrity is non-negotiable—healthcare, finance, legal, and government. It's designed around a single principle:
+Kimberlite is built for clinical and digital-health systems where PHI integrity is non-negotiable. It's designed around a single principle:
 
 > **All data is an immutable, ordered log. All state is a derived view.**
 
@@ -21,7 +21,7 @@ Kimberlite is built for industries where data integrity is non-negotiable—heal
 - **Multi-tenant isolation** - Cryptographic boundaries prevent cross-tenant access
 - **Multi-layer verification** - TLA+ protocol specs, Coq crypto proofs, Alloy structural models, Ivy Byzantine invariants, Kani bounded proofs, MIRI UB detection
 
-**Target industries:** Healthcare (HIPAA), Finance (SOC 2), Legal (chain-of-custody), Government (FedRAMP)
+**Designed for healthcare:** HIPAA-first, with GDPR (international health), SOC 2 (clinical SaaS), and FedRAMP (federal health) as supported overlays.
 
 **→ [Learn more about Kimberlite's architecture](concepts/overview.md)**
 

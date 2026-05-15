@@ -1,8 +1,8 @@
 # Kimberlite Examples
 
 Runnable examples grouped by audience. If you're just trying it for the
-first time, start with `quickstart/`. If you're evaluating Kimberlite for a
-specific domain, jump straight to the matching vertical example.
+first time, start with `quickstart/`. Healthcare is the reference vertical —
+`healthcare/` is the canonical end-to-end walkthrough.
 
 ## Index
 
@@ -13,9 +13,8 @@ specific domain, jump straight to the matching vertical example.
 | [`typescript/`](typescript/) | TypeScript SDK examples: `express-app/`, `nextjs-app/` |
 | [`python/`](python/) | Python SDK examples: `fastapi-app/`, `django-app/` |
 | [`docker/`](docker/) | Docker and Docker Compose configurations |
-| [`healthcare/`](healthcare/) | **End-to-end clinic-management walkthrough** — compliance, consent, erasure, subscribe, typed rows, time-travel. The reference vertical example. |
-| [`finance/`](finance/) | Finance / SEC trade audit-trail schema |
-| [`legal/`](legal/) | Legal chain-of-custody schema |
+| [`healthcare/`](healthcare/) | **End-to-end clinic-management walkthrough** — compliance, consent, erasure, subscribe, typed rows, time-travel. The reference healthcare example. |
+| [`cookbook/`](cookbook/) | Domain-agnostic recipes — time-travel, audit-verify-chain, multi-tenant |
 
 ## Running examples
 

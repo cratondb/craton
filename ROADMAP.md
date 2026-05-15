@@ -1,8 +1,9 @@
 # Kimberlite Roadmap
 
-Kimberlite is an OSS-first, compliance-positioned verifiable database
-for regulated industries (healthcare, finance, legal). All data is an
-immutable ordered log; all state is a derived view.
+Kimberlite is an OSS-first, verifiable database for healthcare —
+clinical/EHR-adjacent systems, digital health, payer/RCM, and clinical
+research. All data is an immutable ordered log; all state is a derived
+view.
 
 This file lists what's shipped, what's next, and the gates v1.0 must
 clear. Detail for each completed release lives in [`CHANGELOG.md`].
@@ -417,8 +418,8 @@ request with justification, not quietly dropped.
 - [ ] HIPAA attestation + a BAA partner willing to use Kimberlite
       as a healthcare database of record.
 - [ ] GDPR readiness review by an independent privacy counsel.
-- [ ] At least one compliance-regulated production deployment
-      (healthcare, finance, or legal) running Kimberlite as the
+- [ ] At least one healthcare production deployment (clinical IT,
+      payer / RCM, or clinical research) running Kimberlite as the
       system of record, not a secondary store.
 
 ### SDK coverage
@@ -511,7 +512,7 @@ specific versions.
   `target:v0.7.0`, link a design doc if the change is non-trivial,
   then submit a PR against this file.
 - **Adding an item to the v1.0 checklist:** the bar is high.
-  v1.0 gates should represent the minimum for a healthcare / finance
+  v1.0 gates should represent the minimum for a healthcare
   production deployment. Open an issue with the label
   `v1.0-gate-proposal` and expect pushback.
 - **Removing a v1.0 gate:** requires a design discussion. Open an

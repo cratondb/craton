@@ -2,18 +2,18 @@
 title: "Introducing Kimberlite"
 slug: "introducing-kimberlite"
 date: 2026-01-23
-excerpt: "A compliance-first, verifiable database for regulated industries. Built on a single principle: all data is an immutable, ordered log."
+excerpt: "A verifiable database for healthcare. Built on a single principle: all data is an immutable, ordered log."
 author_name: "Jared Reyes"
 author_avatar: "/public/images/jared-avatar.jpg"
 ---
 
 # Introducing Kimberlite
 
-We're building something different. Not another database that bolts compliance features onto an existing architecture, but a database designed from first principles for regulated industries.
+We're building something different. Not another database that bolts compliance features onto an existing architecture, but a database designed from first principles for healthcare.
 
 ## The Problem
 
-Healthcare, finance, and legal sectors face a fundamental tension: they need databases that are both performant *and* auditable. Traditional databases treat audit logs as an afterthought—append-only tables that capture *some* changes, with gaps that become fault lines during audits.
+Healthcare faces a fundamental tension: clinical and digital-health systems need databases that are both performant *and* auditable. Traditional databases treat audit logs as an afterthought—append-only tables that capture *some* changes, with gaps that become fault lines during HIPAA audits, OCR investigations, or breach response.
 
 When regulators ask "prove this data hasn't been tampered with," most systems can only offer trust. "Trust that our logs are complete. Trust that nobody with admin access made unauthorized changes. Trust that our backups haven't been modified."
 

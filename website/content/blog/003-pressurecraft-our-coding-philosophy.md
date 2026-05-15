@@ -15,7 +15,7 @@ Diamonds don't become valuable by accident. They're forged under immense pressur
 
 This is about writing code with the same property.
 
-Kimberlite is a compliance-first database for regulated industries—healthcare, finance, legal. Our users stake their businesses on our correctness. An invalid state is not a bug to fix in the next sprint; it is a fault line waiting to rupture during an audit, a lawsuit, or a breach investigation.
+Kimberlite is a verifiable database for healthcare. Our users—clinical IT teams, digital-health platforms, payers, and clinical researchers—stake their patients and their businesses on our correctness. An invalid state is not a bug to fix in the next sprint; it is a fault line waiting to rupture during a HIPAA audit, an OCR investigation, or a breach response.
 
 Our architecture mirrors the geology:
 - **The append-only log** is the stable core—immutable, pressure-forged, enduring

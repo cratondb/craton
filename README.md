@@ -16,9 +16,9 @@
 [![Formal Verification](https://img.shields.io/badge/verified-formal%20spec%20%2B%20bounded%20proofs-success.svg)](docs/concepts/formal-verification.md)
 [![Discord](https://img.shields.io/discord/1468161583787151493?label=discord&logo=discord&color=5865F2)](https://discord.gg/QPChWYjD)
 
-**A compliance-first database for regulated industries.**
+**A verifiable database for healthcare.**
 
-Built for healthcare, finance, legal, and government—where data integrity is non-negotiable.
+Built for clinical and digital-health systems where PHI integrity is non-negotiable.
 
 🔬 **Developer Preview** - Explore deterministic database concepts through production-quality code
 
@@ -42,14 +42,14 @@ Most teams bolt these onto existing databases. **Kimberlite builds them in.**
 - **Multi-tenant isolation** - Cryptographic boundaries prevent cross-tenant access
 - **Multi-layer verification** - TLA+ protocol specs, Coq crypto proofs, Alloy structural models, Ivy Byzantine invariants, Kani bounded model checking, MIRI UB detection ([details](docs/concepts/formal-verification.md))
 
-**Target industries (designed for):** Healthcare (HIPAA-ready), Finance (SOC 2-ready), Legal (chain-of-custody), Government (FedRAMP patterns)
+**Designed for healthcare:** EHR-adjacent systems, digital-health platforms, payer/RCM workloads, and clinical research — every primitive is sized to HIPAA, with GDPR (international health) and SOC 2 / FedRAMP (clinical SaaS / federal health) as load-bearing extensions.
 
 ## Who Should Explore This
 
-- 🏥 **Healthcare developers** - Build HIPAA-ready EHR systems with built-in audit trails
-- 💰 **Finance engineers** - Create SOC 2-ready applications with cryptographic guarantees
-- ⚖️ **Legal tech builders** - Implement chain-of-custody with tamper-evident storage
-- 🔬 **Database researchers** - Study formally specified consensus and immutable log architectures
+- 🏥 **Clinical IT teams** - Build HIPAA-ready EHR-adjacent systems with built-in audit trails
+- 🚀 **Digital-health founders** - Ship FHIR-aware apps without bolting on the compliance plumbing
+- 💳 **Payer & RCM engineers** - Append-only claims ledgers with cryptographic chain-of-custody
+- 🔬 **Clinical researchers & informaticists** - 21 CFR Part 11-friendly audit, de-identification, and time-travel queries
 
 **Perfect for learning.** Not yet recommended for production deployments (see [Status](#status) below).
 

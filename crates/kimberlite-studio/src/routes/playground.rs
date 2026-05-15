@@ -27,15 +27,11 @@ use std::time::{Duration, Instant};
 use crate::state::StudioState;
 use crate::templates;
 
-// Embedded schema SQL for each compliance vertical
+// Embedded schema SQL for the healthcare playground.
 const HEALTHCARE_SQL: &str = include_str!("../../../../examples/healthcare/schema.sql");
-const FINANCE_SQL: &str = include_str!("../../../../examples/finance/schema.sql");
-const LEGAL_SQL: &str = include_str!("../../../../examples/legal/schema.sql");
 
-// Playground tenant IDs (isolated from user data)
+// Playground tenant ID (isolated from user data).
 const HEALTHCARE_TENANT: u64 = 100;
-const FINANCE_TENANT: u64 = 101;
-const LEGAL_TENANT: u64 = 102;
 
 // Rate limiting
 const MAX_QUERIES_PER_MINUTE: u32 = 30;
@@ -64,22 +60,19 @@ pub struct SchemaSignals {
     pub vertical: String,
 }
 
-/// Resolves a vertical name to its tenant ID.
+/// Resolves a vertical name to its tenant ID. Only `healthcare` is supported;
+/// the parameter is retained for wire-compatibility with the existing UI.
 fn tenant_for_vertical(vertical: &str) -> Option<u64> {
     match vertical {
         "healthcare" => Some(HEALTHCARE_TENANT),
-        "finance" => Some(FINANCE_TENANT),
-        "legal" => Some(LEGAL_TENANT),
         _ => None,
     }
 }
 
-/// Returns the schema SQL for a vertical.
+/// Returns the schema SQL for a vertical. Only `healthcare` is supported.
 fn sql_for_vertical(vertical: &str) -> Option<&'static str> {
     match vertical {
         "healthcare" => Some(HEALTHCARE_SQL),
-        "finance" => Some(FINANCE_SQL),
-        "legal" => Some(LEGAL_SQL),
         _ => None,
     }
 }
@@ -211,8 +204,6 @@ pub async fn init_vertical(
         // Render schema tree
         let vertical_label = match vertical.as_str() {
             "healthcare" => "Healthcare (HIPAA)",
-            "finance" => "Finance (SEC/SOX)",
-            "legal" => "Legal (eDiscovery)",
             _ => &vertical,
         };
         let schema_html = templates::render_schema_tree(tenant_id, vertical_label, &schema_tables);
@@ -428,8 +419,6 @@ pub async fn refresh_schema(
 
         let vertical_label = match vertical.as_str() {
             "healthcare" => "Healthcare (HIPAA)",
-            "finance" => "Finance (SEC/SOX)",
-            "legal" => "Legal (eDiscovery)",
             _ => &vertical,
         };
 
@@ -518,42 +507,6 @@ fn render_example_queries(vertical: &str) -> String {
                 "SELECT a.timestamp, a.user_id, a.action, p.first_name, p.last_name FROM audit_log a JOIN patients p ON a.resource_id = p.id WHERE a.resource_type = 'patient';",
             ),
         ],
-        "finance" => vec![
-            (
-                "Active accounts",
-                "SELECT id, account_number, account_type, owner_name, status FROM accounts;",
-            ),
-            (
-                "Trade history",
-                "SELECT t.trade_date, a.owner_name, t.symbol, t.side, t.quantity, t.price_cents, t.compliance_status FROM trades t JOIN accounts a ON t.account_id = a.id ORDER BY t.trade_date;",
-            ),
-            (
-                "Portfolio positions",
-                "SELECT a.owner_name, p.symbol, p.quantity, p.avg_cost_cents, p.market_value_cents FROM positions p JOIN accounts a ON p.account_id = a.id;",
-            ),
-            (
-                "Compliance audit",
-                "SELECT timestamp, user_id, action, details FROM audit_log ORDER BY timestamp;",
-            ),
-        ],
-        "legal" => vec![
-            (
-                "Active cases",
-                "SELECT id, case_number, case_type, title, status, lead_attorney FROM cases;",
-            ),
-            (
-                "Chain of custody",
-                "SELECT cl.timestamp, d.title, cl.action, cl.from_custodian, cl.to_custodian, cl.location FROM custody_log cl JOIN documents d ON cl.document_id = d.id ORDER BY cl.timestamp;",
-            ),
-            (
-                "Active holds",
-                "SELECT h.hold_type, h.scope, h.status, c.case_number FROM holds h JOIN cases c ON h.case_id = c.id WHERE h.status = 'Active';",
-            ),
-            (
-                "Document review",
-                "SELECT d.title, d.document_type, d.classification, d.privilege_status, d.review_status FROM documents d;",
-            ),
-        ],
         _ => vec![],
     };
 
@@ -610,16 +563,16 @@ mod tests {
     #[test]
     fn test_tenant_for_vertical() {
         assert_eq!(tenant_for_vertical("healthcare"), Some(100));
-        assert_eq!(tenant_for_vertical("finance"), Some(101));
-        assert_eq!(tenant_for_vertical("legal"), Some(102));
+        assert_eq!(tenant_for_vertical("finance"), None);
+        assert_eq!(tenant_for_vertical("legal"), None);
         assert_eq!(tenant_for_vertical("unknown"), None);
     }
 
     #[test]
     fn test_sql_for_vertical() {
         assert!(sql_for_vertical("healthcare").is_some());
-        assert!(sql_for_vertical("finance").is_some());
-        assert!(sql_for_vertical("legal").is_some());
+        assert!(sql_for_vertical("finance").is_none());
+        assert!(sql_for_vertical("legal").is_none());
         assert!(sql_for_vertical("unknown").is_none());
     }
 
@@ -643,12 +596,6 @@ mod tests {
         assert!(html.contains("List patients"));
         assert!(html.contains("Encounters by patient"));
         assert!(html.contains("@post"));
-
-        let html = render_example_queries("finance");
-        assert!(html.contains("Active accounts"));
-
-        let html = render_example_queries("legal");
-        assert!(html.contains("Active cases"));
 
         let html = render_example_queries("unknown");
         assert!(html.contains("Example Queries"));

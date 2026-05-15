@@ -52,7 +52,7 @@ authors = ["Jared Reyes <jared.reyes@kimberlite.dev>"]
 repository = "https://github.com/kimberlitedb/kimberlite"
 homepage = "https://github.com/kimberlitedb/kimberlite"
 documentation = "https://docs.rs/kimberlite"
-keywords = ["database", "compliance", "audit", "healthcare", "event-sourcing"]
+keywords = ["healthcare", "hipaa", "fhir", "ehr", "compliance"]
 categories = ["database", "data-structures"]
 
 [workspace.lints.rust]
