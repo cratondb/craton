@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Registry, Token};
@@ -157,7 +158,32 @@ struct PeerConnection {
     addr: SocketAddr,
     /// Current connection state.
     state: PeerState,
+    /// When [`Self::connect`] last attempted to dial. The reconnect
+    /// tick consults this so we don't re-dial a dead peer faster than
+    /// [`Self::reconnect_backoff`] allows — a missing peer would
+    /// otherwise consume the leader's main loop with a redial every
+    /// `heartbeat_interval` (~125 ms in dev), starving the data port
+    /// and the HTTP sidecar.
+    last_reconnect_attempt: Option<std::time::Instant>,
+    /// Current exponential backoff between reconnect attempts. Doubles
+    /// (capped at `RECONNECT_BACKOFF_MAX`) on each failed dial; resets
+    /// on a successful [`PeerState::Connected`] transition.
+    reconnect_backoff: Duration,
 }
+
+/// Minimum delay between reconnect attempts to a Disconnected peer.
+/// Starting value of the per-peer exponential backoff. Tuned small so
+/// initial cluster boot — where peers come up within ~100 ms of each
+/// other and need to discover one another quickly — isn't slowed down
+/// by the backoff. Doubles up to `RECONNECT_BACKOFF_MAX` on each
+/// failed dial, so a permanently-dead peer still backs off the
+/// leader's main loop within seconds.
+const RECONNECT_BACKOFF_MIN: Duration = Duration::from_millis(50);
+/// Cap on the per-peer reconnect backoff. Picked so a permanently-
+/// failed peer is retried about twice per minute — frequent enough
+/// that a restarted peer is picked up quickly, sparse enough to leave
+/// the leader's main loop alone.
+const RECONNECT_BACKOFF_MAX: Duration = Duration::from_secs(30);
 
 impl PeerConnection {
     /// Creates a new peer connection (starts disconnected).
@@ -166,6 +192,8 @@ impl PeerConnection {
             id,
             addr,
             state: PeerState::Disconnected,
+            last_reconnect_attempt: None,
+            reconnect_backoff: RECONNECT_BACKOFF_MIN,
         }
     }
 
@@ -190,6 +218,11 @@ impl PeerConnection {
 
         debug!(peer = %self.id, addr = %self.addr, "connecting to peer");
 
+        // Record the attempt timestamp BEFORE the syscall so the
+        // reconnect tick's backoff computation is honest about when
+        // we last tried, even if the dial itself fails synchronously.
+        self.last_reconnect_attempt = Some(std::time::Instant::now());
+
         // Create non-blocking socket
         let mut stream = TcpStream::connect(self.addr)?;
 
@@ -202,6 +235,32 @@ impl PeerConnection {
 
         self.state = PeerState::Connecting(stream);
         Ok(())
+    }
+
+    /// Returns true when this peer is due for another reconnect
+    /// attempt (Disconnected, and the last attempt was at least
+    /// `reconnect_backoff` ago). Used by the post-bootstrap reconnect
+    /// tick to skip peers that are already in their backoff window.
+    fn ready_for_reconnect(&self, now: std::time::Instant) -> bool {
+        if !matches!(self.state, PeerState::Disconnected) {
+            return false;
+        }
+        match self.last_reconnect_attempt {
+            None => true,
+            Some(last) => now.duration_since(last) >= self.reconnect_backoff,
+        }
+    }
+
+    /// Doubles the reconnect backoff (capped at `RECONNECT_BACKOFF_MAX`)
+    /// after a failed dial. Called from the on_writable failure path.
+    fn note_reconnect_failure(&mut self) {
+        self.reconnect_backoff = (self.reconnect_backoff * 2).min(RECONNECT_BACKOFF_MAX);
+    }
+
+    /// Resets the reconnect backoff after a successful Connected
+    /// transition, so a future flap is retried promptly.
+    fn note_reconnect_success(&mut self) {
+        self.reconnect_backoff = RECONNECT_BACKOFF_MIN;
     }
 
     /// Called when the socket becomes writable (connection may be complete).
@@ -226,10 +285,17 @@ impl PeerConnection {
                             decoder: FrameDecoder::new(),
                             write_buffer: Vec::new(),
                         };
+                        self.note_reconnect_success();
                     }
                     Err(e) => {
-                        warn!(peer = %self.id, error = %e, "connection failed");
+                        // `debug` not `warn` — failed reconnects to a
+                        // legitimately-down peer are expected during
+                        // crash/restart cycles. The exponential
+                        // backoff (see `note_reconnect_failure`) keeps
+                        // us from spamming the log or the kernel.
+                        debug!(peer = %self.id, error = %e, "connection failed");
                         self.state = PeerState::Disconnected;
+                        self.note_reconnect_failure();
                     }
                 }
             }
@@ -861,14 +927,22 @@ impl TcpTransport {
             .map_err(|_| io::Error::other("lock poisoned"))?;
 
         let registry = state.poll.registry().try_clone()?;
+        let now = std::time::Instant::now();
         let mut attempts = 0;
         for peer in state.peers.values_mut() {
-            if matches!(peer.state, PeerState::Disconnected) {
-                if let Err(e) = peer.connect(&registry) {
-                    debug!(peer = %peer.id, error = %e, "reconnect attempt failed");
-                }
-                attempts += 1;
+            // Per-peer exponential backoff: skip peers that are
+            // either not Disconnected, or are inside their backoff
+            // window. Without this gate, a permanently-dead peer
+            // forces a redial every event-loop tick and starves the
+            // leader's data-port + HTTP-sidecar handlers.
+            if !peer.ready_for_reconnect(now) {
+                continue;
             }
+            if let Err(e) = peer.connect(&registry) {
+                debug!(peer = %peer.id, error = %e, "reconnect attempt failed");
+                peer.note_reconnect_failure();
+            }
+            attempts += 1;
         }
         Ok(attempts)
     }

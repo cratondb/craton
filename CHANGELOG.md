@@ -18,6 +18,53 @@ user-facing narrative.
 _Accretion slot for v0.9.0 work. See [`ROADMAP.md`](./ROADMAP.md)
 for planned scope._
 
+### Added — v0.9.x cluster graduation T1.3
+
+- **4 new failure-mode integration scenarios** in
+  `crates/kimberlite-cluster/tests/three_node_integration.rs`,
+  `#[ignore]`d by default and run via
+  `cargo test -p kimberlite-cluster --test three_node_integration -- --ignored`
+  against a built `KIMBERLITE_BIN`:
+  - `cluster_remains_writable_through_follower_crash` — write
+    pre-kill, kill follower, write during, supervise+restart, write
+    post-restart. Verifies leader keeps accepting writes through a
+    follower's crash and that supervisor restart-with-backoff brings
+    the follower back with a fresh PID.
+  - `leader_kill_elects_new_leader_and_old_leader_rejoins` — SIGKILL
+    the leader; assert a new leader emerges; write through the new
+    leader; restart the old leader and assert it rejoins as a
+    follower (not leader).
+  - `leader_kill_flips_follower_readyz_within_5s` — closes the T1.2
+    acceptance bullet (`/readyz` on a follower is 200 within 5 s of
+    the new leader being elected).
+  - `single_node_restart_preserves_writes` — a strict subset of the
+    plan's "rolling restart of all 3 nodes" scenario. Stop+start one
+    follower; assert the baseline write is still visible on every
+    replica including the restarted one. The 3-of-3 rolling-restart
+    extension is deferred — see the scenario's TODO comment for the
+    underlying mio-loop fairness limitation it surfaces.
+- **Shared test helpers** in
+  `crates/kimberlite-cluster/tests/common/mod.rs` — port-band picker,
+  binary discovery, minimal HTTP/1.1 GET, `/metrics`-based leader
+  finder. Imported via `mod common;` in each integration test.
+
+### Fixed — busy-loop reconnect storm starved leader's main loop
+
+The post-bootstrap reconnect tick added in the v0.9.x VSR fixes
+re-dialed every disconnected peer on every `heartbeat_interval`
+(~125 ms in dev). On a peer that was permanently dead (e.g. a
+SIGKILL'd replica during an integration test), this produced 8
+connect attempts per second per peer, and the resulting `WARN` log
+spam plus mio event traffic starved the leader's main loop enough to
+drop client TCP accepts (`EAGAIN`) and HTTP-sidecar scrapes for
+several seconds. Fix: per-peer exponential reconnect backoff
+(50 ms → 30 s, doubled on failure, reset on a successful Connected
+transition). The 50 ms minimum keeps initial cluster boot fast (peers
+that come up within the bootstrap window are still discovered
+quickly); the 30 s cap puts a permanently-dead peer at ~2 attempts
+per minute. Failed-connect logs demoted from `warn` to `debug`.
+(`crates/kimberlite-vsr/src/tcp_transport.rs`)
+
 ### Added — v0.9.x cluster graduation T1.2
 
 - **`/healthz` and `/readyz` Kubernetes-convention HTTP probes.** New
