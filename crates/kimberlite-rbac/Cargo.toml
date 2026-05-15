@@ -27,6 +27,10 @@ tracing.workspace = true
 sha2.workspace = true
 blake3.workspace = true
 
+# SMART on FHIR — JWT validation
+jsonwebtoken.workspace = true
+chrono.workspace = true
+
 [dev-dependencies]
 # Testing
 proptest.workspace = true

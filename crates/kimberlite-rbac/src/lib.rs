@@ -137,6 +137,7 @@
 pub mod enforcement;
 pub mod masking;
 pub mod permissions;
+pub mod smart_on_fhir;
 pub mod policy;
 pub mod roles;
 
