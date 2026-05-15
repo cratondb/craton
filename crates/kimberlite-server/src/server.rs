@@ -126,7 +126,27 @@ impl Server {
             &config.data_dir,
         )?);
 
+        // Install the cluster command router on the underlying
+        // `Kimberlite` so that wire-level writes (which go through the
+        // tenant API → `Kimberlite::submit`) are routed through VSR
+        // instead of applied directly to the local projection. Without
+        // this, replicated mode never replicated writes from the wire
+        // protocol — the `CommandSubmitter` was reachable only via the
+        // chaos worker, not the binary-protocol handler. Installed in
+        // every replicated mode (single-node + cluster); single-node
+        // VSR also benefits from durable submit semantics.
         if submitter.is_replicated() {
+            let router = std::sync::Arc::new(crate::replication::ClusterCommandRouter::new(
+                &submitter,
+            ));
+            submitter
+                .kimberlite()
+                .set_command_router(router)
+                .map_err(|e| {
+                    ServerError::Replication(format!(
+                        "failed to install ClusterCommandRouter: {e}"
+                    ))
+                })?;
             info!(
                 "Server listening on {} with {:?} replication",
                 addr,

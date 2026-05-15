@@ -64,6 +64,22 @@ impl KimberliteConfig {
 /// Default capacity for the verified chain hash cache (number of streams).
 const VERIFIED_HASH_CACHE_CAPACITY: usize = 256;
 
+/// Hook installed by replicated runtimes (`kimberlite-server` in
+/// cluster mode) so [`Kimberlite::submit`] can route writes through
+/// VSR before they touch the local projection.
+///
+/// Implementations MUST eventually call [`Kimberlite::apply_local`] —
+/// either inline (after VSR commit) on the leader, or via a follower-
+/// side projection applier that consumes VSR's `AppliedCommand`
+/// fanout. Without that, the command is "submitted" but never
+/// reflected in the projection.
+pub trait CommandRouter: Send + Sync {
+    /// Submits `command` for replicated processing. Returns once the
+    /// command has been durably committed (typically via VSR's
+    /// quorum) and applied to the local projection.
+    fn submit(&self, command: Command) -> Result<()>;
+}
+
 /// Builds the default schema that every freshly opened (or reset)
 /// Kimberlite has available. Only `events` is predefined; additional
 /// tables are added at runtime by `CREATE TABLE` statements.
@@ -160,6 +176,13 @@ pub(crate) struct KimberliteInner {
     /// None for non-Studio usage to avoid overhead.
     #[cfg(feature = "broadcast")]
     pub(crate) projection_broadcast: Option<Arc<ProjectionBroadcast>>,
+
+    /// Optional VSR routing hook installed by `kimberlite-server` in
+    /// cluster mode. When `Some`, [`Kimberlite::submit`] forwards to
+    /// the router instead of calling [`Kimberlite::apply_local`]
+    /// directly; the router applies through VSR and eventually calls
+    /// back into `apply_local`.
+    pub(crate) command_router: Option<Arc<dyn CommandRouter>>,
 
     /// SQL-level masking rules, keyed by mask name.
     ///
@@ -1513,6 +1536,7 @@ impl Kimberlite {
             audit_log: kimberlite_compliance::audit::ComplianceAuditLog::new(),
             #[cfg(feature = "broadcast")]
             projection_broadcast: None,
+            command_router: None,
             masks: HashMap::new(),
             column_classifications: HashMap::new(),
             roles: Vec::new(),
@@ -1547,10 +1571,60 @@ impl Kimberlite {
         Ok(())
     }
 
+    /// Installs an external [`CommandRouter`] that intercepts every
+    /// future [`Self::submit`] call.
+    ///
+    /// Used by `kimberlite-server` in cluster mode to route writes
+    /// through VSR before they touch the local projection: without
+    /// this hook, `Kimberlite::submit` is purely local and wire-level
+    /// writes never replicate to followers.
+    ///
+    /// The router's implementation is responsible for eventually
+    /// calling [`Self::apply_local`] to actually apply the command to
+    /// the projection — typically once VSR has committed quorum-wide.
+    pub fn set_command_router(&self, router: Arc<dyn CommandRouter>) -> Result<()> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|_| KimberliteError::internal("lock poisoned"))?;
+        inner.command_router = Some(router);
+        Ok(())
+    }
+
     /// Submits a command to the kernel and executes resulting effects.
     ///
     /// This is the core write path: command → kernel → effects → I/O.
+    /// When a [`CommandRouter`] is installed (cluster mode), the
+    /// command is forwarded to the router instead of applied directly;
+    /// the router calls back into [`Self::apply_local`] once VSR has
+    /// committed it. Without a router (single-node / direct mode),
+    /// behaves identically to [`Self::apply_local`].
     pub fn submit(&self, command: Command) -> Result<()> {
+        // Take a clone of the router (cheap — Arc<dyn>) so we don't
+        // hold the inner lock across the router call. The router
+        // re-enters via apply_local which acquires its own lock.
+        let router = {
+            let inner = self
+                .inner
+                .read()
+                .map_err(|_| KimberliteError::internal("lock poisoned"))?;
+            inner.command_router.clone()
+        };
+        match router {
+            Some(r) => r.submit(command),
+            None => self.apply_local(command),
+        }
+    }
+
+    /// Applies a command directly to the local projection, bypassing
+    /// any installed [`CommandRouter`].
+    ///
+    /// This is the destination of both [`Self::submit`] (when no
+    /// router is installed) and the router's callback (after VSR
+    /// commit). Splitting it from `submit` is what breaks the
+    /// recursion that an in-router `kimberlite.submit(cmd)` would
+    /// otherwise cause.
+    pub fn apply_local(&self, command: Command) -> Result<()> {
         let mut inner = self
             .inner
             .write()

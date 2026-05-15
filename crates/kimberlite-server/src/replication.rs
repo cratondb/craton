@@ -11,11 +11,11 @@
 
 use std::fs::{File, OpenOptions};
 use std::path::Path;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::thread;
 use std::time::Duration;
 
-use kimberlite::Kimberlite;
+use kimberlite::{CommandRouter, Kimberlite};
 use kimberlite_kernel::{Command, State as KernelState};
 use kimberlite_types::IdempotencyId;
 use kimberlite_vsr::{
@@ -181,7 +181,11 @@ impl CommandSubmitter {
             .lock()
             .map_err(|_| ServerError::Replication("last_applied_op mutex poisoned".into()))?;
         if op > *guard {
-            db.submit(command.clone())?;
+            // `apply_local`, not `submit` — applying through `submit`
+            // would re-enter the installed `CommandRouter` and recurse
+            // back into VSR. Followers must apply the already-committed
+            // command directly to their projection.
+            db.apply_local(command.clone())?;
             *guard = op;
             Ok(true)
         } else {
@@ -236,8 +240,11 @@ impl CommandSubmitter {
     ) -> ServerResult<SubmissionResult> {
         match self {
             Self::Direct { db } => {
-                // Direct mode: apply to Kimberlite
-                db.submit(command.clone())?;
+                // Direct mode: apply to Kimberlite. `apply_local` skips
+                // any installed router; in Direct mode there shouldn't
+                // be one, but using `apply_local` keeps the contract
+                // explicit and guards against future misconfiguration.
+                db.apply_local(command.clone())?;
 
                 // Direct mode doesn't track operation numbers
                 Ok(SubmissionResult {
@@ -256,10 +263,11 @@ impl CommandSubmitter {
                     .submit(command.clone(), idempotency_id)
                     .map_err(|e| ServerError::Replication(e.to_string()))?;
 
-                // If not a duplicate, apply to Kimberlite for projection updates
-                // The replicator handles durability, but Kimberlite manages projections
+                // If not a duplicate, apply to Kimberlite for projection
+                // updates. `apply_local` (not `submit`) so we don't
+                // re-enter the installed `CommandRouter`.
                 if !result.was_duplicate {
-                    db.submit(command)?;
+                    db.apply_local(command)?;
                 }
 
                 Ok(SubmissionResult {
@@ -307,24 +315,17 @@ impl CommandSubmitter {
                     }
                 })?;
 
-                // Apply to Kimberlite for the leader's own
-                // read-your-writes consistency. The follower projection
-                // applier (if enabled) uses its OWN dedup gate and
-                // won't double-apply — the leader's op will show up
-                // last_applied_op before the fanout receiver processes
-                // it, so the applier skips. When the applier is
-                // disabled (default), followers' projections just stay
-                // stale, which is the pre-existing behavior.
+                // Apply to Kimberlite via the same dedup-gated helper
+                // the projection applier uses. Both paths hold the
+                // mutex across check + apply + update, so there's no
+                // window for the applier (which fires the leader's own
+                // AppliedCommand fanout entry) to double-apply between
+                // the inline submit and the guard update. Using
+                // `apply_local` underneath also breaks recursion back
+                // into the installed `CommandRouter`.
                 if !result.was_duplicate {
                     let op = result.op_number.as_u64();
-                    db.submit(command.clone())?;
-                    // Advance last_applied_op so the background applier
-                    // knows not to re-apply this op.
-                    if let Ok(mut guard) = last_applied_op.lock() {
-                        if op > *guard {
-                            *guard = op;
-                        }
-                    }
+                    Self::apply_once_to_projection(last_applied_op, db, op, &command)?;
                 }
 
                 Ok(SubmissionResult {
@@ -413,12 +414,9 @@ impl CommandSubmitter {
 
                 if !result.was_duplicate {
                     let op = result.op_number.as_u64();
-                    db.submit(command)?;
-                    if let Ok(mut guard) = last_applied_op.lock() {
-                        if op > *guard {
-                            *guard = op;
-                        }
-                    }
+                    // Same dedup-gated apply as `submit_with_idempotency`
+                    // — see that comment for the full rationale.
+                    Self::apply_once_to_projection(last_applied_op, db, op, &command)?;
                 }
 
                 Ok(SubmissionResult {
@@ -553,6 +551,47 @@ impl CommandSubmitter {
                 Some(repl.subscribe_applied_commits(capacity))
             }
         }
+    }
+}
+
+/// `CommandRouter` adapter that lets `Kimberlite::submit` forward
+/// wire-level writes through VSR.
+///
+/// Holds a [`Weak`] reference to the [`CommandSubmitter`] to avoid the
+/// cycle that would otherwise form (`Kimberlite` holds the router via
+/// `Arc<dyn CommandRouter>`; the submitter holds the `Kimberlite`).
+/// If the submitter has been dropped (server shutdown), the router
+/// surfaces a clear error rather than silently no-oping.
+pub struct ClusterCommandRouter {
+    submitter: Weak<CommandSubmitter>,
+}
+
+impl ClusterCommandRouter {
+    /// Constructs a router pointing at the supplied submitter. The
+    /// router holds a `Weak<...>` so the install-on-Kimberlite step
+    /// doesn't create an `Arc` cycle.
+    pub fn new(submitter: &Arc<CommandSubmitter>) -> Self {
+        Self {
+            submitter: Arc::downgrade(submitter),
+        }
+    }
+}
+
+impl CommandRouter for ClusterCommandRouter {
+    fn submit(&self, command: Command) -> kimberlite::Result<()> {
+        let submitter = self.submitter.upgrade().ok_or_else(|| {
+            kimberlite::KimberliteError::internal(
+                "ClusterCommandRouter: CommandSubmitter has been dropped",
+            )
+        })?;
+        // `CommandSubmitter::submit` runs the VSR commit + the
+        // local `apply_local`. The latter is the destination of the
+        // route — without `apply_local`'s recursion-break this would
+        // re-enter the router and loop forever.
+        submitter.submit(command).map_err(|e| {
+            kimberlite::KimberliteError::internal(format!("cluster submit failed: {e}"))
+        })?;
+        Ok(())
     }
 }
 

@@ -12,10 +12,32 @@
 //! - At most one leader per view
 //! - Progress guaranteed if a majority is available
 
+use std::hash::{Hash, Hasher};
+
 use crate::message::{self, DoViewChange, MessagePayload, StartView, StartViewChange};
 use crate::types::{CommitNumber, ReplicaId, ReplicaStatus, ViewNumber};
 
 use super::{ReplicaOutput, ReplicaState, msg_broadcast, msg_to};
+
+/// Stable 64-bit hash of the parts of a `DoViewChange` that can
+/// legitimately change between two retransmissions from the same
+/// (sender, view) pair: `last_normal_view`, `op_number`, and the
+/// integrity-checked `log_tail_hash`. Used as the dedup key so genuine
+/// retransmissions with newer state pass through to the leader's
+/// "use the better message" replacement logic, while byte-identical
+/// replays still hash the same and get rejected by the dedup tracker.
+///
+/// `DefaultHasher` is fine here — this is a dedup key inside a single
+/// process, not a cryptographic identity. The integrity check at
+/// `view_change.rs::on_do_view_change` (via `log_tail_hash_of`)
+/// already guards against tampering with the body.
+fn do_view_change_content_hash(dvc: &DoViewChange) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    dvc.last_normal_view.hash(&mut hasher);
+    dvc.op_number.hash(&mut hasher);
+    dvc.log_tail_hash.hash(&mut hasher);
+    hasher.finish()
+}
 
 impl ReplicaState {
     // ========================================================================
@@ -225,8 +247,19 @@ impl ReplicaState {
             return (self, ReplicaOutput::empty());
         }
 
-        // Replay detection (AUDIT-2026-03 M-6)
-        let msg_id = crate::replica::state::MessageId::do_view_change(from, dvc.view);
+        // Replay detection (AUDIT-2026-03 M-6).
+        //
+        // The dedup key includes a hash of the DoViewChange's
+        // `(last_normal_view, op_number, log_tail_hash)` so a sender
+        // that legitimately retransmits with newer state (it learned a
+        // higher last_normal_view since its first send) is NOT
+        // misclassified as a replay — the leader's "use the better
+        // message" replacement logic below depends on those
+        // retransmissions reaching it. A byte-identical retransmission
+        // still hashes the same and is rejected.
+        let content_hash = do_view_change_content_hash(&dvc);
+        let msg_id =
+            crate::replica::state::MessageId::do_view_change(from, dvc.view, content_hash);
         if self.message_dedup_tracker.check_and_record(msg_id).is_err() {
             tracing::warn!(
                 replica = %self.replica_id,
@@ -1065,6 +1098,93 @@ mod tests {
         assert!(
             backup.reconfig_state.is_joint(),
             "Backup should restore joint consensus state from StartView"
+        );
+    }
+
+    /// Helper: identical DoViewChange retransmissions are still rejected
+    /// by the dedup gate. Guards against regressing the audit-2026-03
+    /// replay-protection contract while we loosen dedup to admit
+    /// "better message" retransmissions.
+    #[test]
+    fn duplicate_do_view_change_with_identical_content_is_rejected() {
+        let config = test_config_3();
+        let mut leader = ReplicaState::new(ReplicaId::new(1), config);
+        leader = leader.transition_to_view(ViewNumber::new(1));
+
+        let dvc = DoViewChange::new(
+            ViewNumber::new(1),
+            ReplicaId::new(0),
+            ViewNumber::ZERO,
+            OpNumber::new(1),
+            CommitNumber::ZERO,
+            vec![test_entry(1, 0)],
+        );
+
+        let (leader, _) = leader.on_do_view_change(ReplicaId::new(0), dvc.clone());
+        assert_eq!(leader.do_view_change_msgs.len(), 1, "first DVC should be recorded");
+
+        // Replay the exact same bytes — must hash to the same key and
+        // be rejected by the dedup tracker.
+        let (leader, _) = leader.on_do_view_change(ReplicaId::new(0), dvc);
+        assert_eq!(
+            leader.do_view_change_msgs.len(),
+            1,
+            "byte-identical retransmission should NOT add a second entry"
+        );
+    }
+
+    /// Sender legitimately retransmits a DoViewChange after learning a
+    /// higher op_number. Pre-fix: dedup rejected it as "replay" and
+    /// the leader's "use better message" replacement at lines ~287-318
+    /// never got to run. Post-fix: content_hash differs, dedup admits
+    /// it, replacement logic upgrades the cached entry.
+    #[test]
+    fn better_do_view_change_retransmission_replaces_existing() {
+        let config = test_config_3();
+        let mut leader = ReplicaState::new(ReplicaId::new(1), config);
+        leader = leader.transition_to_view(ViewNumber::new(1));
+
+        // First send: small log
+        let dvc_initial = DoViewChange::new(
+            ViewNumber::new(1),
+            ReplicaId::new(0),
+            ViewNumber::ZERO,
+            OpNumber::new(1),
+            CommitNumber::ZERO,
+            vec![test_entry(1, 0)],
+        );
+        let (leader, _) = leader.on_do_view_change(ReplicaId::new(0), dvc_initial);
+        let recorded = leader
+            .do_view_change_msgs
+            .iter()
+            .find(|m| m.replica == ReplicaId::new(0))
+            .map(|m| m.op_number);
+        assert_eq!(
+            recorded,
+            Some(OpNumber::new(1)),
+            "leader should have recorded the initial op_number"
+        );
+
+        // Same sender, same view, but a longer/newer log — the dedup
+        // gate must NOT shadow this update.
+        let dvc_better = DoViewChange::new(
+            ViewNumber::new(1),
+            ReplicaId::new(0),
+            ViewNumber::ZERO,
+            OpNumber::new(3),
+            CommitNumber::ZERO,
+            vec![test_entry(1, 0), test_entry(2, 0), test_entry(3, 0)],
+        );
+        let (leader, _) = leader.on_do_view_change(ReplicaId::new(0), dvc_better);
+        let recorded_after = leader
+            .do_view_change_msgs
+            .iter()
+            .find(|m| m.replica == ReplicaId::new(0))
+            .map(|m| m.op_number);
+        assert_eq!(
+            recorded_after,
+            Some(OpNumber::new(3)),
+            "leader should have replaced the cached DVC with the higher-op_number retransmission"
         );
     }
 }

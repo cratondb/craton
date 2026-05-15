@@ -513,6 +513,9 @@ pub struct EventLoop<S> {
     heartbeat_interval: Duration,
     /// Time of last heartbeat sent (for leader).
     last_heartbeat_sent: Instant,
+    /// Time of the last post-bootstrap reconnect-tick. Throttles peer
+    /// reconnection attempts so we don't dial-storm a flapping peer.
+    last_reconnect_tick: Instant,
     /// Running flag.
     running: bool,
 }
@@ -552,6 +555,7 @@ impl<S: Read + Write + Seek> EventLoop<S> {
             pending_commits: HashMap::new(),
             last_tick: Instant::now(),
             last_heartbeat_sent: Instant::now(),
+            last_reconnect_tick: Instant::now(),
             running: true,
         };
 
@@ -612,8 +616,32 @@ impl<S: Read + Write + Seek> EventLoop<S> {
                 }
             }
 
-            // 6. Periodic tick for housekeeping
+            // 6. Periodic peer-reconnect tick. A peer that came up after
+            // bootstrap (or dropped its connection mid-run) would
+            // otherwise stay `Disconnected` forever — `connect_all` is
+            // only called once during bootstrap. Throttled to one
+            // attempt per `heartbeat_interval` so a flapping peer can't
+            // cause a dial-storm. The connect attempt itself is
+            // non-blocking (mio non-blocking TcpStream); a peer that
+            // doesn't accept just stays in `Disconnected` until the
+            // next tick.
             let now = Instant::now();
+            if now.duration_since(self.last_reconnect_tick) > self.heartbeat_interval {
+                self.last_reconnect_tick = now;
+                let disconnected = self.transport.disconnected_peer_ids();
+                if !disconnected.is_empty() {
+                    debug!(
+                        replica = %self.replica_state.replica_id(),
+                        ?disconnected,
+                        "reconnecting to disconnected peers"
+                    );
+                    if let Err(e) = self.transport.reconnect_disconnected() {
+                        warn!(error = %e, "reconnect tick failed");
+                    }
+                }
+            }
+
+            // 7. Periodic tick for housekeeping
             if now.duration_since(self.last_tick) > Duration::from_millis(100) {
                 self.last_tick = now;
                 // Could add additional periodic tasks here
@@ -632,6 +660,21 @@ impl<S: Read + Write + Seek> EventLoop<S> {
     fn process_event(&mut self, event: ReplicaEvent) -> Result<(), VsrError> {
         trace!(event = ?event, "processing event");
 
+        // Reset the heartbeat-deadline whenever the leader contacts us at
+        // the current view. Without this, a follower's view-change deadline
+        // expires every `view_change_timeout` regardless of how reliably the
+        // leader is heartbeating — the cluster ends up in a view-change
+        // storm with view climbing once per timeout period. Mirrors Raft's
+        // "reset election timer on any AppendEntries from current leader"
+        // rule. Inspecting the event here is the single hook that catches
+        // every leader-originated message type without threading state
+        // through the per-handler return shapes.
+        if let ReplicaEvent::Message(msg) = &event {
+            if self.is_from_current_leader(msg) {
+                self.timeouts.reset_heartbeat();
+            }
+        }
+
         // Take ownership for pure state transition
         let state = std::mem::replace(
             &mut self.replica_state,
@@ -648,6 +691,35 @@ impl<S: Read + Write + Seek> EventLoop<S> {
         self.update_shared_state();
 
         Ok(())
+    }
+
+    /// Returns true when `msg` is a leader-originated, current-view
+    /// message from the live leader (i.e. evidence that the leader is
+    /// still alive). Stale-view leader messages are NOT counted — they
+    /// would otherwise pin the follower to a deposed leader and prevent
+    /// it from ever advancing its view.
+    fn is_from_current_leader(&self, msg: &crate::message::Message) -> bool {
+        let local_id = self.replica_state.replica_id();
+        if msg.from == local_id {
+            return false;
+        }
+        if msg.from != self.replica_state.leader() {
+            return false;
+        }
+        let payload_view = match msg.payload.view() {
+            Some(v) => v,
+            None => return false,
+        };
+        if payload_view != self.replica_state.view() {
+            return false;
+        }
+        matches!(
+            msg.payload,
+            MessagePayload::Heartbeat(_)
+                | MessagePayload::Prepare(_)
+                | MessagePayload::Commit(_)
+                | MessagePayload::StartView(_)
+        )
     }
 
     /// Handles output from the replica state machine.
@@ -864,9 +936,19 @@ impl<S: Read + Write + Seek> EventLoop<S> {
 
         let bootstrap_timeout = Duration::from_secs(5);
         let bootstrap_start = Instant::now();
+        let cluster_size = self.cluster_config.cluster_size();
         let quorum_needed = self.cluster_config.quorum_size();
+        let mut last_reconnect_attempt = Instant::now();
 
-        // Wait for quorum connectivity (or timeout)
+        // Wait for full-mesh connectivity (or timeout). Returning early at
+        // quorum was a real bug: a follower would exit bootstrap as soon
+        // as it shook hands with the leader, before its sibling-follower
+        // link came up. With no post-bootstrap reconnect (added below),
+        // R1↔R2 stayed disconnected forever and replicated commits never
+        // reached the late peer's projection. Waiting for full mesh —
+        // with the same 5 s timeout fallback as before — costs at most a
+        // few hundred extra milliseconds in the happy path and prevents
+        // the partial-mesh failure mode entirely.
         loop {
             // Poll for connection events
             let messages = self
@@ -883,25 +965,51 @@ impl<S: Read + Write + Seek> EventLoop<S> {
             let connected = self.transport.connected_count() + 1;
             self.update_shared_state();
 
-            if connected >= quorum_needed {
+            if connected >= cluster_size {
                 info!(
                     replica = %self.replica_state.replica_id(),
                     connected = connected,
-                    quorum = quorum_needed,
-                    "bootstrap complete: quorum reached"
+                    cluster_size = cluster_size,
+                    "bootstrap complete: full mesh established"
                 );
                 self.mark_bootstrap_complete();
                 return Ok(());
             }
 
-            // Check timeout
+            // Re-attempt connections every ~250 ms during bootstrap so a
+            // peer that came up after our initial dial gets picked up
+            // before the bootstrap timeout fires.
+            let now = Instant::now();
+            if now.duration_since(last_reconnect_attempt) > Duration::from_millis(250) {
+                last_reconnect_attempt = now;
+                if let Err(e) = self.transport.reconnect_disconnected() {
+                    warn!(error = %e, "bootstrap reconnect attempt failed");
+                }
+            }
+
+            // Check timeout: proceed with whatever connectivity we have
+            // as long as we cleared quorum. Below quorum we still
+            // proceed (the existing behaviour) but log loudly — the
+            // cluster won't be writable until the missing peers come up.
             if bootstrap_start.elapsed() > bootstrap_timeout {
-                warn!(
-                    replica = %self.replica_state.replica_id(),
-                    connected = connected,
-                    quorum = quorum_needed,
-                    "bootstrap timeout: proceeding with available peers"
-                );
+                let missing = self.transport.disconnected_peer_ids();
+                if connected >= quorum_needed {
+                    warn!(
+                        replica = %self.replica_state.replica_id(),
+                        connected = connected,
+                        cluster_size = cluster_size,
+                        ?missing,
+                        "bootstrap timeout: proceeding with quorum, missing peers will reconnect in background"
+                    );
+                } else {
+                    warn!(
+                        replica = %self.replica_state.replica_id(),
+                        connected = connected,
+                        quorum = quorum_needed,
+                        ?missing,
+                        "bootstrap timeout: BELOW QUORUM; cluster will not be writable until peers reconnect"
+                    );
+                }
                 self.mark_bootstrap_complete();
                 return Ok(());
             }
@@ -928,11 +1036,6 @@ impl<S: Read + Write + Seek> EventLoop<S> {
         }
     }
 
-    /// Called when receiving a message from the leader (resets heartbeat timeout).
-    #[allow(dead_code)]
-    fn on_leader_message(&mut self) {
-        self.timeouts.reset_heartbeat();
-    }
 }
 
 // ============================================================================

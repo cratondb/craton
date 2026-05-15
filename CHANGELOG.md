@@ -18,6 +18,112 @@ user-facing narrative.
 _Accretion slot for v0.9.0 work. See [`ROADMAP.md`](./ROADMAP.md)
 for planned scope._
 
+### Added — v0.9.x cluster graduation T1.1
+
+- **`kimberlite-cluster` supervisor spawns real `kimberlite start`
+  subprocesses.** Replaced the placeholder spawn in `node.rs:91` (the
+  CLI's own test binary, which exited immediately) with a real
+  `kimberlite start [--cluster] <data_dir> --address <addr>`
+  invocation. New three-tier binary discovery
+  (`locate_kimberlite_binary`): `KIMBERLITE_BIN` env override → `$PATH`
+  lookup → sibling-of-current-exe fallback (handles the cargo
+  `target/<profile>/deps/` test-binary layout).
+- **VSR port offset (`VSR_PORT_OFFSET = 100`).** VSR's `TcpTransport`
+  binds its own listener distinct from the client data port; the
+  supervisor rewrites peer addresses through `shift_peer_port` when
+  rendering `KMB_CLUSTER_PEERS` so data + VSR don't collide on
+  localhost. Real boot-time bug — manual probe surfaced "Address
+  already in use" until fixed.
+- **Multi-node configs boot with `--cluster` automatically.** When
+  `NodeConfig.peers` is non-empty the supervisor passes `--cluster`
+  plus the `KMB_REPLICA_ID`, `KMB_CLUSTER_PEERS`, `KMB_HTTP_PORT`,
+  and `KMB_ENABLE_FOLLOWER_PROJECTION=1` env that VSR + the projection
+  applier expect. Single-node configs (`peers.is_empty()`) keep the
+  default single-node-VSR boot.
+- **Supervisor accessors for integration tests.** New
+  `ClusterSupervisor::node`, `node_mut`, `supervise_once`, and
+  `NodeProcess::pid` / `force_kill`. Lets tests SIGKILL a child
+  out-of-band and step the supervisor's restart-with-backoff
+  deterministically without racing the 1-second monitor tick.
+- **`tests/three_node_smoke.rs` integration test.** Two `#[ignore]`d
+  scenarios that boot 3 real nodes on a free port band:
+  `three_node_cluster_smoke` (write through leader, read back from a
+  follower) and `supervisor_restarts_killed_follower` (SIGKILL one,
+  assert recovery with fresh PID + bumped `restart_count`). Both
+  green — see the cluster graduation plan for the acceptance contract.
+
+### Fixed — VSR multi-node localhost was unrecoverable
+
+A 3-node cluster on `127.0.0.1` previously entered a view-change
+storm within ~3 seconds of bootstrap (view number climbing once per
+second, never settling). Four distinct bugs compounded; all four
+fixed, and a new VSR-only loopback regression test
+(`crates/kimberlite-vsr/tests/three_node_loopback.rs`) covers the
+post-fix invariant (stable leader + cross-replica replication via
+the in-VSR API). See `docs-internal/design-docs/active/cluster-
+graduation-v0.9.x.md` for the full punch list.
+
+- **Heartbeat reset is no longer dead code.** `EventLoop::process_event`
+  now calls `timeouts.reset_heartbeat()` whenever an incoming message
+  is from the current leader at the current view (Heartbeat / Prepare /
+  Commit / StartView). Without this the follower's `last_heartbeat`
+  deadline only got reset when the timeout itself fired, so every
+  follower fired a view change every `view_change_timeout` (1 s in
+  development), pushing view by 1 each time even when the leader was
+  healthily heartbeating. Mirrors Raft's "reset election timer on any
+  AppendEntries from current leader" rule. Removed the dead
+  `on_leader_message()` helper.
+- **Bootstrap waits for full mesh + reconnect tick.**
+  `run_bootstrap_phase` previously exited when `connected_count + 1 >=
+  quorum_size`, so a follower returned the moment it shook hands with
+  the leader — its sibling-follower link stayed unconnected and there
+  was no post-bootstrap reconnect path. Now: cluster mode waits for
+  full membership (5 s timeout fallback with quorum / below-quorum
+  diagnostic warnings); the main loop fires a reconnect tick every
+  `heartbeat_interval` so a peer that comes up late or drops mid-run
+  gets re-dialed. New `TcpTransport::reconnect_disconnected` and
+  `disconnected_peer_ids` accessors back the tick.
+- **`Hello` handshake binds inbound TCP socket → `ReplicaId`.** New
+  `MessagePayload::Hello { sender_id, cluster_hash }` sent as the
+  first frame on every freshly-opened outbound connection. Inbound
+  state machine in `tcp_transport::route_inbound_frame` rejects
+  connections whose first frame isn't a valid Hello, validates
+  `cluster_hash` against `ClusterAddresses::membership_hash` (BLAKE3
+  via `kimberlite-crypto`), binds the inbound mio `Token` to the
+  declared `ReplicaId`, and on every subsequent frame enforces
+  `msg.from == bound_id`. Spoofed-from messages are dropped with a
+  Byzantine-rejection metric. Closes a real reliability gap: the
+  transport previously trusted the spoofable `from` field on every
+  frame and never identified inbound peers.
+- **`DoViewChange` dedup no longer shadows the "use better message"
+  replacement logic.** `MessageId` gained an `Option<u64>
+  content_hash`; `MessageId::do_view_change(...)` now requires a hash
+  derived from `(last_normal_view, op_number, log_tail_hash)`.
+  Byte-identical replays still hash the same and are rejected (the
+  audit-2026-03 M-6 contract); legitimate retransmissions with newer
+  state get through, and the "replace if higher
+  `(last_normal_view, op_number)`" replacement at
+  `view_change.rs:287-318` finally runs.
+- **Wire-protocol writes route through VSR.** The wire handler called
+  `tenant.create_stream` → `Kimberlite::submit`, which was purely
+  local — replicated cluster mode never replicated wire writes. New
+  `kimberlite::CommandRouter` trait + `Kimberlite::set_command_router`
+  + `Kimberlite::apply_local` (the recursion-break for routers that
+  apply through the local projection). `kimberlite-server` ships a
+  `ClusterCommandRouter` that the server installs on the underlying
+  `Kimberlite` whenever replication is enabled. The leader's inline
+  apply now uses the same dedup-gated `apply_once_to_projection` the
+  follower applier uses — closes a race that surfaced as
+  `"stream with id X already exists"` once routing was wired.
+- **`MultiNodeReplicator` API additions.** `subscribe_applied_commands`
+  and the `AppliedCommand` fanout were already wired; this work makes
+  them actually flow on the leader's wire-write path. No public API
+  removal; the `Hello` payload variant is wire-incompatible with
+  pre-fix `kimberlite-vsr` builds, but the crate is internal
+  (`description = "Viewstamped Replication consensus for Kimberlite"`,
+  not yet on a stable surface) and pre-graduation per the cluster
+  plan, so this is acceptable.
+
 ### Added — OSS launch readiness
 
 - **Plan-time time-fold production wiring.** `plan_query` now folds

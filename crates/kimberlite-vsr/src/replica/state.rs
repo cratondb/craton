@@ -27,6 +27,13 @@ use super::{ReplicaEvent, ReplicaOutput, TimeoutKind, msg_broadcast};
 ///
 /// **Security:** Used to detect Byzantine replay attacks where old messages
 /// are re-sent to disrupt consensus.
+///
+/// `content_hash` distinguishes legitimately-different retransmissions
+/// from byte-identical replays. Today only used by `DoViewChange`,
+/// where the receiving leader's "use the better message" replacement
+/// logic in `view_change.rs::on_do_view_change` would otherwise be
+/// shadowed by `(sender, view)`-only dedup — a real bug we hit in
+/// the v0.9.x cluster graduation work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct MessageId {
     /// Sender replica ID
@@ -37,6 +44,10 @@ pub(crate) struct MessageId {
     pub view: ViewNumber,
     /// Operation number (for op-aware messages like Prepare/PrepareOk)
     pub op_number: Option<OpNumber>,
+    /// Hash of message content for variants whose body can legitimately
+    /// change between retransmissions. `None` for variants that should
+    /// always dedup on `(sender, view, ...)` alone.
+    pub content_hash: Option<u64>,
 }
 
 impl MessageId {
@@ -47,6 +58,7 @@ impl MessageId {
             msg_type: 0,
             view,
             op_number: Some(op_number),
+            content_hash: None,
         }
     }
 
@@ -57,6 +69,7 @@ impl MessageId {
             msg_type: 1,
             view,
             op_number: Some(op_number),
+            content_hash: None,
         }
     }
 
@@ -75,6 +88,7 @@ impl MessageId {
             // HashSet key stays a single tuple — commit_number and
             // op_number occupy disjoint message types.
             op_number: Some(commit_number.as_op_number()),
+            content_hash: None,
         }
     }
 
@@ -92,6 +106,7 @@ impl MessageId {
             msg_type: 3,
             view,
             op_number: Some(commit_number.as_op_number()),
+            content_hash: None,
         }
     }
 
@@ -102,16 +117,25 @@ impl MessageId {
             msg_type: 4,
             view,
             op_number: None,
+            content_hash: None,
         }
     }
 
     /// Creates a MessageId for a DoViewChange message.
-    pub fn do_view_change(sender: ReplicaId, view: ViewNumber) -> Self {
+    ///
+    /// `content_hash` distinguishes legitimately-different
+    /// retransmissions (sender learned a higher `last_normal_view` /
+    /// `op_number` since its first send) from byte-identical replays.
+    /// Without it, the dedup gate at the call site shadows the leader's
+    /// "use the better message" replacement logic — see the v0.9.x
+    /// cluster graduation work for the bug repro.
+    pub fn do_view_change(sender: ReplicaId, view: ViewNumber, content_hash: u64) -> Self {
         Self {
             sender,
             msg_type: 5,
             view,
             op_number: None,
+            content_hash: Some(content_hash),
         }
     }
 
@@ -122,6 +146,7 @@ impl MessageId {
             msg_type: 6,
             view,
             op_number: None,
+            content_hash: None,
         }
     }
 }
@@ -756,6 +781,20 @@ impl ReplicaState {
         }
 
         match msg.payload {
+            // Transport-layer handshake — `TcpTransport` consumes Hello
+            // frames before they reach the event loop. Reaching this arm
+            // means the transport leaked one through (programmer error
+            // or in-process test transport without the inbound Hello
+            // gate); drop it to keep the state machine deterministic.
+            MessagePayload::Hello(_) => {
+                tracing::warn!(
+                    replica = %self.replica_id,
+                    from = %msg.from.as_u8(),
+                    "Hello reached replica state machine; transport should have stripped it"
+                );
+                (self, ReplicaOutput::empty())
+            }
+
             // Normal operation
             MessagePayload::Prepare(prepare) => self.on_prepare(msg.from, prepare),
             MessagePayload::PrepareOk(prepare_ok) => self.on_prepare_ok(msg.from, prepare_ok),

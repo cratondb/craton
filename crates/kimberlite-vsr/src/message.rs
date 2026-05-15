@@ -196,6 +196,20 @@ impl Message {
 /// The payload of a VSR protocol message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MessagePayload {
+    // === Transport Handshake ===
+    /// Dialer → Acceptor: First frame on every freshly-opened TCP
+    /// connection. Identifies the sender and proves shared cluster
+    /// membership via `cluster_hash`.
+    ///
+    /// Handled entirely at the transport layer (`TcpTransport`); the
+    /// replica state machine never observes a `Hello`. Sent unsigned —
+    /// the cluster_hash provides the "you must know our membership"
+    /// gate, and per-message signing on subsequent frames provides the
+    /// per-replica authenticity guarantee. A future hardening step is
+    /// to also sign the Hello with the dialer's VSR key (gated on
+    /// transport-side key access).
+    Hello(Hello),
+
     // === Normal Operation ===
     /// Leader → Backup: Replicate this operation.
     Prepare(Prepare),
@@ -265,7 +279,8 @@ impl MessagePayload {
             MessagePayload::RecoveryResponse(m) => Some(m.view),
             MessagePayload::StateTransferResponse(m) => Some(m.checkpoint_view),
             // Messages without view context
-            MessagePayload::RecoveryRequest(_)
+            MessagePayload::Hello(_)
+            | MessagePayload::RecoveryRequest(_)
             | MessagePayload::RepairRequest(_)
             | MessagePayload::RepairResponse(_)
             | MessagePayload::Nack(_)
@@ -278,6 +293,7 @@ impl MessagePayload {
     /// Returns a human-readable name for the message type.
     pub fn name(&self) -> &'static str {
         match self {
+            MessagePayload::Hello(_) => "Hello",
             MessagePayload::Prepare(_) => "Prepare",
             MessagePayload::PrepareOk(_) => "PrepareOk",
             MessagePayload::Commit(_) => "Commit",
@@ -296,6 +312,29 @@ impl MessagePayload {
             MessagePayload::WriteReorderGapResponse(_) => "WriteReorderGapResponse",
         }
     }
+}
+
+// ============================================================================
+// Transport Handshake
+// ============================================================================
+
+/// Per-connection identity claim sent as the first frame on every
+/// freshly-opened TCP connection.
+///
+/// `cluster_hash` is the BLAKE3-derived membership hash of the dialer's
+/// `ClusterAddresses` (`tcp_transport::ClusterAddresses::membership_hash`).
+/// Acceptors compare it with their own; mismatched hashes mean the
+/// connection misrouted (different cluster, dev/prod mix-up, scrambled
+/// config) and the acceptor drops without binding. Matching hashes bind
+/// the inbound socket's mio `Token` to `sender_id` so subsequent frames
+/// can be authenticated against a transport-verified identity rather
+/// than a spoofable `from` field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hello {
+    /// The dialer's replica id.
+    pub sender_id: ReplicaId,
+    /// BLAKE3 membership hash; see [`tcp_transport::ClusterAddresses::membership_hash`].
+    pub cluster_hash: u64,
 }
 
 // ============================================================================

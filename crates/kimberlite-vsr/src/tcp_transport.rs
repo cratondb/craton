@@ -24,7 +24,7 @@ use mio::{Events, Interest, Poll, Registry, Token};
 use tracing::{debug, trace, warn};
 
 use crate::framing::{FrameDecoder, FrameEncoder};
-use crate::message::Message;
+use crate::message::{Message, MessagePayload};
 use crate::transport::Transport;
 use crate::types::ReplicaId;
 
@@ -88,6 +88,43 @@ impl ClusterAddresses {
     /// Returns true if there are no addresses.
     pub fn is_empty(&self) -> bool {
         self.addresses.is_empty()
+    }
+
+    /// Computes a 64-bit BLAKE3-derived hash of the cluster membership.
+    ///
+    /// Membership is sorted by `ReplicaId` before hashing to make the
+    /// result independent of `HashMap` iteration order. Used as the
+    /// `cluster_hash` field of [`crate::message::Hello`] so a misrouted
+    /// connection (different cluster, dev/prod mix-up, scrambled config)
+    /// is rejected at handshake time before it can settle and pollute
+    /// VSR state.
+    ///
+    /// Two replicas with identical `ClusterAddresses` produce the same
+    /// hash; any difference in membership (added/removed replica,
+    /// changed address, changed port) yields a different hash.
+    pub fn membership_hash(&self) -> u64 {
+        let mut entries: Vec<_> = self
+            .addresses
+            .iter()
+            .map(|(id, addr)| (id.as_u8(), *addr))
+            .collect();
+        entries.sort_by_key(|(id, _)| *id);
+
+        // Build a canonical byte buffer: [id][addr-string][\0] per entry.
+        // Use the crypto crate's BLAKE3 wrapper rather than depending on
+        // the raw `blake3` crate directly — keeps the cryptographic
+        // dependency centralised.
+        let mut buf = Vec::with_capacity(entries.len() * 32);
+        for (id, addr) in entries {
+            buf.push(id);
+            buf.extend_from_slice(addr.to_string().as_bytes());
+            buf.push(0);
+        }
+        let digest = kimberlite_crypto::hash::internal_hash(&buf);
+        let bytes = digest.as_bytes();
+        u64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])
     }
 }
 
@@ -339,11 +376,53 @@ impl PeerConnection {
 // ============================================================================
 
 /// An inbound connection from another replica.
+///
+/// `bound_id` is `None` until the inbound socket sends a valid `Hello`
+/// frame; the transport rejects every other frame on an unbound socket.
+/// Once bound, every subsequent message must satisfy `msg.from ==
+/// bound_id` — that turns the previously trust-the-`from`-field model
+/// into a transport-verified identity check, so a peer can no longer
+/// spoof another replica's id by setting the field on a forged
+/// payload.
 struct InboundConnection {
     stream: TcpStream,
     decoder: FrameDecoder,
-    #[allow(dead_code)]
-    replica_id: Option<ReplicaId>,
+    bound_id: Option<ReplicaId>,
+}
+
+/// Outcome of routing a single inbound frame through the Hello
+/// handshake state machine.
+enum InboundFate {
+    /// Frame is post-handshake VSR traffic — forward upstream.
+    Forward(Message),
+    /// Frame is part of the handshake (a valid Hello). Don't forward.
+    Consumed,
+    /// Frame violates the handshake contract — drop the connection.
+    Reject(InboundRejection),
+}
+
+/// Why an inbound connection was rejected. Logged at warn for operator
+/// visibility; the actual remediation (drop the connection) happens in
+/// the caller.
+#[derive(Debug)]
+#[allow(dead_code)] // fields read via Debug formatting in warn! sites
+enum InboundRejection {
+    /// Hello.cluster_hash didn't match ours — different cluster.
+    ClusterMismatch { sender: ReplicaId },
+    /// Hello.sender_id != msg.from — Hello envelope is internally
+    /// inconsistent and can't be trusted to identify the peer.
+    HelloSenderMismatch { from: ReplicaId, claimed: ReplicaId },
+    /// First frame on the connection was not a Hello.
+    FirstFrameNotHello {
+        from: ReplicaId,
+        payload: &'static str,
+    },
+    /// Unsolicited Hello after the connection was already bound.
+    DuplicateHello { from: ReplicaId },
+    /// Post-handshake message had a `from` field that doesn't match
+    /// the transport-verified bound identity. Likely a spoof attempt
+    /// or a serious bug.
+    FromSpoof { from: ReplicaId, bound: ReplicaId },
 }
 
 // ============================================================================
@@ -354,6 +433,11 @@ struct InboundConnection {
 struct TransportState {
     /// This replica's ID.
     local_id: ReplicaId,
+    /// BLAKE3-derived hash of `addresses`, computed once at construction.
+    /// Sent in every outbound `Hello` and validated against inbound
+    /// `Hello`s — mismatch means misrouted connection (different
+    /// cluster, dev/prod mix-up) and the connection is dropped.
+    cluster_hash: u64,
     /// Connections to peer replicas.
     peers: HashMap<ReplicaId, PeerConnection>,
     /// mio Poll instance for event notification.
@@ -423,8 +507,11 @@ impl TcpTransport {
             }
         }
 
+        let cluster_hash = addresses.membership_hash();
+
         let state = TransportState {
             local_id,
+            cluster_hash,
             peers,
             poll,
             listener: Some(listener),
@@ -457,8 +544,11 @@ impl TcpTransport {
             }
         }
 
+        let cluster_hash = addresses.membership_hash();
+
         let state = TransportState {
             local_id,
+            cluster_hash,
             peers,
             poll,
             listener: None,
@@ -492,6 +582,12 @@ impl TcpTransport {
             .map(|e| (e.token(), e.is_readable(), e.is_writable()))
             .collect();
 
+        // Snapshot identity values needed inside the per-event match —
+        // we can't read `state.local_id` / `state.cluster_hash` while
+        // also holding a `&mut state.peers` borrow.
+        let local_id = state.local_id;
+        let cluster_hash = state.cluster_hash;
+
         for (token, is_readable, is_writable) in event_data {
             match token {
                 LISTENER_TOKEN => {
@@ -505,7 +601,31 @@ impl TcpTransport {
                     let registry = state.poll.registry().try_clone()?;
                     if let Some(peer) = state.peers.get_mut(&peer_id) {
                         if is_writable {
+                            let was_connecting =
+                                matches!(peer.state, PeerState::Connecting(_));
                             peer.on_writable(&registry)?;
+                            // The dialer (us) introduces itself with a
+                            // Hello as the very first frame on every
+                            // freshly-opened connection. Sequencing is
+                            // safe because `queue_send` only succeeds
+                            // when the peer is Connected and nothing
+                            // else writes between Connecting → Connected
+                            // and this hook within the same poll
+                            // iteration — so Hello always lands first.
+                            let just_connected = was_connecting
+                                && matches!(peer.state, PeerState::Connected { .. });
+                            if just_connected {
+                                let hello = Message::broadcast(
+                                    local_id,
+                                    MessagePayload::Hello(crate::message::Hello {
+                                        sender_id: local_id,
+                                        cluster_hash,
+                                    }),
+                                );
+                                if let Err(e) = peer.queue_send(&hello) {
+                                    warn!(peer = %peer_id, error = %e, "failed to queue Hello");
+                                }
+                            }
                             let _ = peer.flush();
                         }
                         if is_readable {
@@ -516,8 +636,12 @@ impl TcpTransport {
                 t => {
                     // Inbound connection
                     if is_readable {
-                        let should_remove =
-                            Self::handle_inbound_read(&mut state.inbound, t, &mut messages);
+                        let should_remove = Self::handle_inbound_read(
+                            &mut state.inbound,
+                            t,
+                            cluster_hash,
+                            &mut messages,
+                        );
                         if should_remove {
                             state.inbound.remove(&t);
                         }
@@ -538,44 +662,128 @@ impl TcpTransport {
 
     /// Handles reading from an inbound connection.
     /// Returns true if the connection should be removed.
+    ///
+    /// Enforces the Hello-handshake contract:
+    /// 1. Until `bound_id` is set, the only acceptable frame is a
+    ///    `Hello` whose `cluster_hash` matches ours. Anything else (a
+    ///    valid VSR message before introduction, a Hello with the wrong
+    ///    cluster, a malformed frame) drops the connection.
+    /// 2. Once bound, every subsequent frame must satisfy
+    ///    `msg.from == bound_id` — the transport now provides verified
+    ///    sender identity rather than trusting the spoofable `from`
+    ///    field.
+    /// 3. `Hello` frames are stripped before forwarding upstream; the
+    ///    replica state machine never observes them.
     fn handle_inbound_read(
         inbound: &mut HashMap<Token, InboundConnection>,
         token: Token,
+        local_cluster_hash: u64,
         messages: &mut Vec<Message>,
     ) -> bool {
-        if let Some(conn) = inbound.get_mut(&token) {
-            let mut buf = [0u8; READ_BUFFER_SIZE];
-            loop {
-                match conn.stream.read(&mut buf) {
-                    Ok(0) => {
-                        // Connection closed
-                        return true;
-                    }
-                    Ok(n) => {
-                        conn.decoder.extend(&buf[..n]);
-                        loop {
-                            match conn.decoder.decode() {
-                                Ok(Some(msg)) => messages.push(msg),
-                                Ok(None) => break,
-                                Err(e) => {
-                                    warn!(error = %e, "decode error on inbound");
-                                    if e.is_fatal() {
+        let Some(conn) = inbound.get_mut(&token) else {
+            return false;
+        };
+
+        let mut buf = [0u8; READ_BUFFER_SIZE];
+        loop {
+            match conn.stream.read(&mut buf) {
+                Ok(0) => {
+                    // Connection closed
+                    return true;
+                }
+                Ok(n) => {
+                    conn.decoder.extend(&buf[..n]);
+                    loop {
+                        match conn.decoder.decode() {
+                            Ok(Some(msg)) => {
+                                match Self::route_inbound_frame(
+                                    &mut conn.bound_id,
+                                    local_cluster_hash,
+                                    msg,
+                                ) {
+                                    InboundFate::Forward(m) => messages.push(m),
+                                    InboundFate::Consumed => {}
+                                    InboundFate::Reject(reason) => {
+                                        warn!(
+                                            ?reason,
+                                            "rejecting inbound connection during handshake"
+                                        );
                                         return true;
                                     }
-                                    break;
                                 }
+                            }
+                            Ok(None) => break,
+                            Err(e) => {
+                                warn!(error = %e, "decode error on inbound");
+                                if e.is_fatal() {
+                                    return true;
+                                }
+                                break;
                             }
                         }
                     }
-                    Err(e) if e.kind() == ErrorKind::WouldBlock => break,
-                    Err(e) => {
-                        warn!(error = %e, "read error on inbound");
-                        return true;
-                    }
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => break,
+                Err(e) => {
+                    warn!(error = %e, "read error on inbound");
+                    return true;
                 }
             }
         }
         false
+    }
+
+    /// Decides what happens to a single decoded inbound frame.
+    ///
+    /// Pulled out of [`Self::handle_inbound_read`] so the binding
+    /// state-machine is testable in isolation (no `TcpStream` needed)
+    /// and the read loop body stays scannable.
+    fn route_inbound_frame(
+        bound_id: &mut Option<ReplicaId>,
+        local_cluster_hash: u64,
+        msg: Message,
+    ) -> InboundFate {
+        match (*bound_id, &msg.payload) {
+            (None, MessagePayload::Hello(hello)) => {
+                if hello.cluster_hash != local_cluster_hash {
+                    return InboundFate::Reject(InboundRejection::ClusterMismatch {
+                        sender: hello.sender_id,
+                    });
+                }
+                if hello.sender_id != msg.from {
+                    return InboundFate::Reject(InboundRejection::HelloSenderMismatch {
+                        from: msg.from,
+                        claimed: hello.sender_id,
+                    });
+                }
+                *bound_id = Some(hello.sender_id);
+                debug!(
+                    bound = %hello.sender_id,
+                    "inbound connection bound to replica via Hello"
+                );
+                InboundFate::Consumed
+            }
+            (None, _) => InboundFate::Reject(InboundRejection::FirstFrameNotHello {
+                from: msg.from,
+                payload: msg.payload.name(),
+            }),
+            (Some(_), MessagePayload::Hello(_)) => {
+                // A second Hello on an already-bound connection is
+                // protocol noise (or a peer attempting to re-bind to a
+                // different identity). Treat as a violation.
+                InboundFate::Reject(InboundRejection::DuplicateHello { from: msg.from })
+            }
+            (Some(bound), _) => {
+                if msg.from != bound {
+                    crate::instrumentation::METRICS.increment_signature_failures();
+                    return InboundFate::Reject(InboundRejection::FromSpoof {
+                        from: msg.from,
+                        bound,
+                    });
+                }
+                InboundFate::Forward(msg)
+            }
+        }
     }
 
     /// Accepts pending inbound connections.
@@ -607,7 +815,7 @@ impl TcpTransport {
                         InboundConnection {
                             stream,
                             decoder: FrameDecoder::new(),
-                            replica_id: None,
+                            bound_id: None,
                         },
                     );
                 }
@@ -634,6 +842,37 @@ impl TcpTransport {
         Ok(())
     }
 
+    /// Re-attempts connection to any peer currently in `Disconnected` state.
+    ///
+    /// Used by the event loop's periodic reconnect tick to repair the
+    /// mesh after a peer comes online late, recovers from a crash, or
+    /// drops a connection mid-run. Peers in `Connecting` or `Connected`
+    /// states are left alone — they're either making progress or already
+    /// good. Returns the number of peers a reconnect was attempted on.
+    ///
+    /// Errors during individual reconnects are logged at `debug` (the
+    /// peer just stays `Disconnected`); only registry-clone failure
+    /// surfaces as `Err` because it indicates a deeper poll-thread
+    /// problem we shouldn't paper over.
+    pub fn reconnect_disconnected(&self) -> io::Result<usize> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| io::Error::other("lock poisoned"))?;
+
+        let registry = state.poll.registry().try_clone()?;
+        let mut attempts = 0;
+        for peer in state.peers.values_mut() {
+            if matches!(peer.state, PeerState::Disconnected) {
+                if let Err(e) = peer.connect(&registry) {
+                    debug!(peer = %peer.id, error = %e, "reconnect attempt failed");
+                }
+                attempts += 1;
+            }
+        }
+        Ok(attempts)
+    }
+
     /// Returns true if connected to the specified peer.
     pub fn is_connected(&self, peer: ReplicaId) -> bool {
         self.state
@@ -649,6 +888,26 @@ impl TcpTransport {
             .lock()
             .ok()
             .map_or(0, |s| s.peers.values().filter(|p| p.is_connected()).count())
+    }
+
+    /// Returns the IDs of peers currently in `Disconnected` state. Used
+    /// by bootstrap and the reconnect tick to log which specific peers
+    /// haven't come up yet — `connected_count()` alone hides identity.
+    pub fn disconnected_peer_ids(&self) -> Vec<ReplicaId> {
+        self.state
+            .lock()
+            .ok()
+            .map(|s| {
+                let mut ids: Vec<_> = s
+                    .peers
+                    .iter()
+                    .filter(|(_, p)| matches!(p.state, PeerState::Disconnected))
+                    .map(|(id, _)| *id)
+                    .collect();
+                ids.sort_by_key(ReplicaId::as_u8);
+                ids
+            })
+            .unwrap_or_default()
     }
 
     /// Returns the local replica ID.
@@ -764,5 +1023,165 @@ mod tests {
         assert!(!peer.is_connected());
         assert!(!peer.has_pending_writes());
         assert_eq!(peer.token(), Token(PEER_TOKEN_BASE + 1));
+    }
+
+    #[test]
+    fn membership_hash_is_order_independent() {
+        let mut a = HashMap::new();
+        a.insert(ReplicaId::new(0), "127.0.0.1:6000".parse().unwrap());
+        a.insert(ReplicaId::new(1), "127.0.0.1:6001".parse().unwrap());
+        a.insert(ReplicaId::new(2), "127.0.0.1:6002".parse().unwrap());
+
+        let mut b = HashMap::new();
+        // Insert in reverse — ensures HashMap ordering doesn't matter.
+        b.insert(ReplicaId::new(2), "127.0.0.1:6002".parse().unwrap());
+        b.insert(ReplicaId::new(1), "127.0.0.1:6001".parse().unwrap());
+        b.insert(ReplicaId::new(0), "127.0.0.1:6000".parse().unwrap());
+
+        assert_eq!(
+            ClusterAddresses::new(a).membership_hash(),
+            ClusterAddresses::new(b).membership_hash()
+        );
+    }
+
+    #[test]
+    fn membership_hash_changes_when_membership_changes() {
+        let mut base = HashMap::new();
+        base.insert(ReplicaId::new(0), "127.0.0.1:6000".parse().unwrap());
+        base.insert(ReplicaId::new(1), "127.0.0.1:6001".parse().unwrap());
+        base.insert(ReplicaId::new(2), "127.0.0.1:6002".parse().unwrap());
+        let h0 = ClusterAddresses::new(base.clone()).membership_hash();
+
+        // Change a port → different hash.
+        let mut variant = base.clone();
+        variant.insert(ReplicaId::new(2), "127.0.0.1:6999".parse().unwrap());
+        assert_ne!(h0, ClusterAddresses::new(variant).membership_hash());
+
+        // Drop a replica → different hash.
+        let mut shorter = base;
+        shorter.remove(&ReplicaId::new(2));
+        assert_ne!(h0, ClusterAddresses::new(shorter).membership_hash());
+    }
+
+    /// Builds a Hello message with the specified sender id and hash.
+    fn hello_msg(sender: ReplicaId, cluster_hash: u64) -> Message {
+        Message::broadcast(
+            sender,
+            MessagePayload::Hello(crate::message::Hello {
+                sender_id: sender,
+                cluster_hash,
+            }),
+        )
+    }
+
+    /// Builds a stubbed-out Heartbeat message for handshake tests.
+    /// Content doesn't matter — only `from` and the variant are
+    /// inspected by the routing helper.
+    fn fake_heartbeat(from: ReplicaId) -> Message {
+        use crate::message::Heartbeat;
+        use crate::types::{CommitNumber, ViewNumber};
+        Message::broadcast(
+            from,
+            MessagePayload::Heartbeat(Heartbeat::without_clock(
+                ViewNumber::new(0),
+                CommitNumber::ZERO,
+            )),
+        )
+    }
+
+    #[test]
+    fn handshake_binds_on_matching_hello_then_forwards_traffic() {
+        let mut bound = None;
+        let hash = 0xCAFE_BABE_u64;
+
+        let fate = TcpTransport::route_inbound_frame(
+            &mut bound,
+            hash,
+            hello_msg(ReplicaId::new(2), hash),
+        );
+        assert!(matches!(fate, InboundFate::Consumed));
+        assert_eq!(bound, Some(ReplicaId::new(2)));
+
+        let fate = TcpTransport::route_inbound_frame(
+            &mut bound,
+            hash,
+            fake_heartbeat(ReplicaId::new(2)),
+        );
+        assert!(matches!(fate, InboundFate::Forward(_)));
+    }
+
+    #[test]
+    fn handshake_rejects_first_frame_when_not_hello() {
+        let mut bound = None;
+        let fate = TcpTransport::route_inbound_frame(
+            &mut bound,
+            0,
+            fake_heartbeat(ReplicaId::new(1)),
+        );
+        assert!(matches!(
+            fate,
+            InboundFate::Reject(InboundRejection::FirstFrameNotHello { .. })
+        ));
+        assert!(bound.is_none(), "binding should not occur on rejection");
+    }
+
+    #[test]
+    fn handshake_rejects_hello_with_wrong_cluster_hash() {
+        let mut bound = None;
+        let fate = TcpTransport::route_inbound_frame(
+            &mut bound,
+            0xAAAA,
+            hello_msg(ReplicaId::new(1), 0xBBBB),
+        );
+        assert!(matches!(
+            fate,
+            InboundFate::Reject(InboundRejection::ClusterMismatch { .. })
+        ));
+        assert!(bound.is_none());
+    }
+
+    #[test]
+    fn handshake_rejects_hello_when_sender_id_mismatches_envelope_from() {
+        let mut bound = None;
+        let hash = 0x1234;
+        let mut hello = hello_msg(ReplicaId::new(1), hash);
+        // Tamper: envelope from claims R1 but Hello says R2.
+        if let MessagePayload::Hello(ref mut h) = hello.payload {
+            h.sender_id = ReplicaId::new(2);
+        }
+        let fate = TcpTransport::route_inbound_frame(&mut bound, hash, hello);
+        assert!(matches!(
+            fate,
+            InboundFate::Reject(InboundRejection::HelloSenderMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn handshake_rejects_post_bind_message_with_spoofed_from() {
+        let mut bound = Some(ReplicaId::new(1));
+        // Bound to R1 but the heartbeat claims to be from R2.
+        let fate = TcpTransport::route_inbound_frame(
+            &mut bound,
+            0,
+            fake_heartbeat(ReplicaId::new(2)),
+        );
+        assert!(matches!(
+            fate,
+            InboundFate::Reject(InboundRejection::FromSpoof { .. })
+        ));
+    }
+
+    #[test]
+    fn handshake_rejects_duplicate_hello_after_bind() {
+        let mut bound = Some(ReplicaId::new(1));
+        let fate = TcpTransport::route_inbound_frame(
+            &mut bound,
+            0,
+            hello_msg(ReplicaId::new(1), 0),
+        );
+        assert!(matches!(
+            fate,
+            InboundFate::Reject(InboundRejection::DuplicateHello { .. })
+        ));
     }
 }
