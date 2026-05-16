@@ -3050,13 +3050,16 @@ name = "kimberlite-cluster"
 version = "0.8.0"
 dependencies = [
  "anyhow",
+ "blake3",
  "kimberlite-client",
  "kimberlite-types",
  "serde",
+ "tar",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "toml",
+ "zstd",
 ]
 
 [[package]]

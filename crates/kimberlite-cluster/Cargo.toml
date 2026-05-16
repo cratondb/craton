@@ -23,6 +23,11 @@ toml = { workspace = true }
 # Async runtime
 tokio = { workspace = true, features = ["process", "signal", "sync", "time"] }
 
+# Backup/restore — `backup` module tars+zstd's a node data dir.
+tar = { workspace = true }
+zstd = { workspace = true }
+blake3 = { workspace = true }
+
 # Kimberlite dependencies
 kimberlite-types = { workspace = true }
 

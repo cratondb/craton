@@ -6,11 +6,15 @@
 //! - Health monitoring and failover testing
 //! - Single supervisor process managing N nodes
 
+pub mod backup;
 pub mod config;
 pub mod error;
 pub mod node;
 pub mod supervisor;
 
+pub use backup::{
+    BackupEntry, BackupSummary, RestoreSummary, backup_cluster, restore_cluster,
+};
 pub use config::{ClusterConfig, ClusterTopology, HTTP_PORT_OFFSET, NodeConfig, VSR_PORT_OFFSET};
 pub use error::{Error, Result};
 pub use node::{NodeProcess, NodeStatus};

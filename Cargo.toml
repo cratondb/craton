@@ -168,6 +168,9 @@ crossbeam-queue = "0.3"
 lz4_flex = "0.12"
 zstd = "0.13"
 
+# Archiving (cluster backup / restore — T2.2)
+tar = "0.4"
+
 # Thread affinity
 core_affinity = "0.8"
 

@@ -3,8 +3,8 @@
 use anyhow::{Context, Result};
 use comfy_table::{Cell, Color, Table, presets::UTF8_FULL};
 use kimberlite_cluster::{
-    ClusterConfig, NodeStatus, init_cluster, init_cluster_with_hosts, start_cluster,
-    start_cluster_node,
+    ClusterConfig, NodeStatus, backup_cluster, init_cluster, init_cluster_with_hosts,
+    restore_cluster, start_cluster, start_cluster_node,
 };
 use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
@@ -243,6 +243,87 @@ pub fn status(project: &str) -> Result<()> {
     println!();
     println!("Base Port: {}", config.base_port);
     println!("Nodes: {running_count}/{} running", config.node_count);
+
+    Ok(())
+}
+
+/// Back up a cluster's data dir into a `tar.zst` archive.
+///
+/// HIPAA § 164.308(a)(7) — contingency plan. The operator chooses when
+/// to invoke this (stop writes first for a clean snapshot, or accept
+/// the trailing-fsync semantic). The archive carries an embedded
+/// BLAKE3 manifest so [`restore`] can verify integrity end-to-end.
+pub fn backup(project: &str, output: &str) -> Result<()> {
+    let project_path = Path::new(project);
+    let output_path = Path::new(output);
+
+    println!(
+        "Backing up cluster {} → {}",
+        project.code(),
+        output.code()
+    );
+
+    let spinner = create_spinner("Creating archive...");
+    let summary = backup_cluster(project_path, output_path)
+        .with_context(|| "Failed to back up cluster")?;
+    finish_success(
+        &spinner,
+        &format!(
+            "Backup complete ({} files, {} MB → {} MB)",
+            summary.file_count,
+            summary.uncompressed_bytes / 1_048_576,
+            summary.compressed_bytes / 1_048_576,
+        ),
+    );
+
+    println!();
+    println!("Archive: {}", summary.archive_path.display().to_string().code());
+    println!("Files:   {}", summary.file_count);
+    println!(
+        "Size:    {} bytes uncompressed, {} bytes on disk",
+        summary.uncompressed_bytes, summary.compressed_bytes
+    );
+    println!("Created: {} (UNIX seconds)", summary.created_at_secs);
+
+    Ok(())
+}
+
+/// Restore a cluster backup into a fresh data dir.
+///
+/// The target directory must be empty or absent; restoring on top of a
+/// live cluster is rejected. After extract, every file's BLAKE3 is
+/// re-checked against the archive's manifest.
+pub fn restore(input: &str, target: &str) -> Result<()> {
+    let input_path = Path::new(input);
+    let target_path = Path::new(target);
+
+    println!(
+        "Restoring backup {} → {}",
+        input.code(),
+        target.code()
+    );
+
+    let spinner = create_spinner("Extracting and verifying...");
+    let summary = restore_cluster(input_path, target_path)
+        .with_context(|| "Failed to restore cluster")?;
+    finish_success(
+        &spinner,
+        &format!("Restore complete ({} files)", summary.file_count),
+    );
+
+    println!();
+    println!(
+        "Cluster dir: {}",
+        summary.cluster_dir.display().to_string().code()
+    );
+    println!("Files:       {}", summary.file_count);
+    println!("Size:        {} bytes", summary.uncompressed_bytes);
+    println!();
+    println!(
+        "Start the restored cluster with:  {} cluster start --project {}",
+        "kimberlite".code(),
+        target.code()
+    );
 
     Ok(())
 }

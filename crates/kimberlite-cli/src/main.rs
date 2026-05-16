@@ -336,6 +336,38 @@ enum ClusterCommands {
         #[arg(long)]
         force: bool,
     },
+
+    /// Create a `tar.zst` backup of the cluster's data dir.
+    ///
+    /// Captures `<project>/cluster/` — every node's data dir plus
+    /// `cluster.toml` — into a single self-checksummed archive. The
+    /// operator chooses when to run this (HIPAA § 164.308(a)(7)
+    /// contingency plan): stop writes first for a clean snapshot, or
+    /// accept the trailing-fsync-window-could-roll-back semantic.
+    Backup {
+        /// Project directory (the same path passed to `cluster init`).
+        #[arg(short, long, default_value = ".")]
+        project: String,
+
+        /// Output archive path. Convention: `<name>.tar.zst`.
+        #[arg(long, value_name = "ARCHIVE")]
+        output: String,
+    },
+
+    /// Restore a cluster backup into a fresh data dir.
+    ///
+    /// The target directory must be empty or absent; restoring on top of
+    /// a live cluster is rejected. After extract, every file's BLAKE3 is
+    /// re-checked against the embedded manifest.
+    Restore {
+        /// Archive produced by `cluster backup`.
+        #[arg(long, value_name = "ARCHIVE")]
+        input: String,
+
+        /// Fresh data dir to restore into (must be empty).
+        #[arg(long, value_name = "DIR")]
+        target: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -654,6 +686,12 @@ async fn main() -> Result<()> {
             ClusterCommands::Status { project } => commands::cluster::status(&project),
             ClusterCommands::Destroy { project, force } => {
                 commands::cluster::destroy(&project, force)
+            }
+            ClusterCommands::Backup { project, output } => {
+                commands::cluster::backup(&project, &output)
+            }
+            ClusterCommands::Restore { input, target } => {
+                commands::cluster::restore(&input, &target)
             }
         },
         Commands::Migration(cmd) => match cmd {
