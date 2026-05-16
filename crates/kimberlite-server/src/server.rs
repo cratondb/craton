@@ -287,27 +287,17 @@ impl Server {
                 return Err(e.into());
             }
 
-            // Process events
-            for event in &events {
-                match event.token() {
-                    LISTENER_TOKEN => {
-                        self.accept_connections()?;
-                    }
-                    crate::http::HTTP_LISTENER_TOKEN => {
-                        if let Some(ref sidecar) = self.http_sidecar {
-                            sidecar.handle_accept(&self.health_checker);
-                        }
-                    }
-                    token => {
-                        if event.is_readable() {
-                            self.handle_readable(token)?;
-                        }
-                        if event.is_writable() {
-                            self.handle_writable(token)?;
-                        }
-                    }
-                }
-            }
+            // Two-pass dispatch: listener events first so client accepts
+            // don't get starved when a large per-connection burst arrives
+            // in the same wakeup. Under view-change churn the protocol
+            // layer can queue dozens of per-connection writes; accepting
+            // first keeps the kernel's accept backlog from overflowing
+            // (which surfaces as `EAGAIN` / dropped SYN-ACK retransmits
+            // on the test bench, and as "connection refused" on the
+            // client). HTTP probe accepts are cheap and ride the same
+            // bus.
+            self.dispatch_listener_events(&events)?;
+            self.dispatch_per_connection_events(&events)?;
 
             // Pump subscriptions on timeout wakeups OR to drain any
             // newly-available events for subscriptions on other connections.
@@ -319,6 +309,45 @@ impl Server {
             // Clean up closed connections
             self.cleanup_closed();
         }
+    }
+
+    /// First-pass dispatch: drain the client-data and HTTP-probe accept
+    /// queues before doing per-connection I/O. See [`Self::run`].
+    fn dispatch_listener_events(&mut self, events: &Events) -> ServerResult<()> {
+        for event in events {
+            match event.token() {
+                LISTENER_TOKEN => {
+                    self.accept_connections()?;
+                }
+                crate::http::HTTP_LISTENER_TOKEN => {
+                    if let Some(ref sidecar) = self.http_sidecar {
+                        sidecar.handle_accept(&self.health_checker);
+                    }
+                }
+                _ => { /* per-connection event — second pass */ }
+            }
+        }
+        Ok(())
+    }
+
+    /// Second-pass dispatch: per-connection readable/writable events.
+    fn dispatch_per_connection_events(&mut self, events: &Events) -> ServerResult<()> {
+        for event in events {
+            match event.token() {
+                LISTENER_TOKEN | crate::http::HTTP_LISTENER_TOKEN => {
+                    /* handled in the first pass */
+                }
+                token => {
+                    if event.is_readable() {
+                        self.handle_readable(token)?;
+                    }
+                    if event.is_writable() {
+                        self.handle_writable(token)?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// True if any connection has at least one active subscription.
@@ -345,32 +374,15 @@ impl Server {
 
     /// Runs a single iteration of the event loop.
     ///
-    /// Useful for testing or custom event loops.
+    /// Useful for testing or custom event loops. Uses the same two-pass
+    /// listener-first dispatch as [`Self::run`].
     pub fn poll_once(&mut self, timeout: Option<std::time::Duration>) -> ServerResult<()> {
         let mut events = Events::with_capacity(MAX_EVENTS);
 
         self.poll.poll(&mut events, timeout)?;
 
-        for event in &events {
-            match event.token() {
-                LISTENER_TOKEN => {
-                    self.accept_connections()?;
-                }
-                crate::http::HTTP_LISTENER_TOKEN => {
-                    if let Some(ref sidecar) = self.http_sidecar {
-                        sidecar.handle_accept(&self.health_checker);
-                    }
-                }
-                token => {
-                    if event.is_readable() {
-                        self.handle_readable(token)?;
-                    }
-                    if event.is_writable() {
-                        self.handle_writable(token)?;
-                    }
-                }
-            }
-        }
+        self.dispatch_listener_events(&events)?;
+        self.dispatch_per_connection_events(&events)?;
 
         self.cleanup_closed();
         Ok(())

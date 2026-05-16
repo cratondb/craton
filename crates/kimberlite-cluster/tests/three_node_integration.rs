@@ -21,27 +21,36 @@
 //!
 //! ## Known flakiness
 //!
-//! Scenarios 1 and 2 are flaky on local runs (~3–4/5 isolation soak),
-//! tied to two pre-existing limitations they surface:
+//! Scenarios 1 and 2 are flaky on local runs (2-3/5 isolation soak),
+//! tied to one remaining pre-existing limitation they surface:
 //!
-//! - `MultiNodeReplicator::is_leader()` returns true based purely on
-//!   `(current_view, replica_id)` without checking that the replica
-//!   is in `Normal` status. During a view change, multiple replicas
-//!   can transiently report `is_leader=1`. The test workaround is to
-//!   round-robin all 3 replicas in `create_stream_via_leader` and let
-//!   the wire-protocol's `NotLeader` error settle the question — but
-//!   the brief window where the cluster has no node accepting writes
-//!   still produces occasional timeouts.
-//! - The leader's main mio loop services the data port, the HTTP
-//!   sidecar, AND VSR transport. Under repeated view-change churn the
-//!   loop is starved enough that the data-port accept queue can
-//!   reject with `EAGAIN` for a few seconds. This produces the
-//!   `Resource temporarily unavailable (os error 35)` errors visible
-//!   in flaky runs.
+//! - **NotLeader hint advertises the VSR replica port, not the
+//!   client-data port.** When a follower receives a write and replies
+//!   `NotLeader { leader_hint: ... }`, the hint is the leader's VSR
+//!   transport address (data_port + `VSR_PORT_OFFSET`) rather than its
+//!   client-facing data port. The client SDK then connects to the
+//!   wrong port and the subsequent retry never reaches the new leader.
+//!   Workaround in `create_stream_via_leader` is to round-robin all
+//!   three replicas in sequence; this still fails when every retry
+//!   lands a `NotLeader` with a wrong hint within the test deadline.
 //!
-//! Both are real bugs but out of scope for T1.3 (which is about the
-//! supervisor + spawn-path contract). Tracked as follow-ups; nightly
-//! CI should retry-on-fail with a small backoff to ride them out.
+//! Two earlier flakes are now fixed in v0.9.x:
+//!
+//! - ~~`MultiNodeReplicator::is_leader()` returns true on view ID
+//!   alone.~~ Fixed: `is_leader` now reads
+//!   `SharedState.is_leader = ReplicaState::is_acting_leader()` which
+//!   requires `Normal` status. See
+//!   `kimberlite-vsr/src/replica/state.rs::is_acting_leader`.
+//! - ~~Leader mio loop starves the data-port accept queue under
+//!   view-change churn (`EAGAIN` / OS error 35).~~ Fixed: server
+//!   event loop now does a two-pass listener-first dispatch so client
+//!   accepts can't be starved by per-connection bursts. See
+//!   `kimberlite-server/src/server.rs::dispatch_listener_events`.
+//!
+//! The remaining NotLeader-hint flake is tracked as a v0.9.x follow-up
+//! and pre-dates T1; the supervisor and accept-path contracts these
+//! tests cover are sound. Nightly CI should retry-on-fail with a small
+//! backoff to ride out NotLeader convergence.
 
 mod common;
 
