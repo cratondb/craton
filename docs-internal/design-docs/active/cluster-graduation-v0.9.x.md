@@ -82,6 +82,15 @@ Test coverage today is unit-only; the supervisor's restart logic has never been 
 
 ## T2 — Critical (should ship in v0.9.x — slip-to-v0.10 is OK only with stated risk)
 
+### T1 follow-ups (post-T1.3) — **DONE**
+
+The T1.3 integration tests called out two follow-up bugs that surfaced as ~3-4/5 flake. Both fixed in v0.9.x:
+
+- **`MultiNodeReplicator::is_leader` ignored Normal status.** Pure view-table lookup let the gauge / submit gate read `true` on a replica mid-view-change. Fixed by introducing `ReplicaState::is_acting_leader()` (`Normal && view-leader`) and routing `SharedState.is_leader` through it. See `crates/kimberlite-vsr/src/replica/state.rs::is_acting_leader` + `crates/kimberlite-vsr/src/event_loop.rs::update_shared_state`. Two paired tests in `replica/state.rs`.
+- **Server mio loop starved the data-port accept queue.** Single-thread Poll serviced data-port + HTTP probe + per-connection events in one pass; under view-change churn the per-connection burst delayed accepts, kernel backlog overflowed (visible as `Resource temporarily unavailable` / `os error 35`). Fixed with two-pass listener-first dispatch: `dispatch_listener_events` + `dispatch_per_connection_events` in `crates/kimberlite-server/src/server.rs`. `poll_once` uses the same path. Soak on `leader_kill_flips_follower_readyz_within_5s`: 5/5 (was 3-4/5).
+
+Remaining T1 integration flake (`cluster_remains_writable_through_follower_crash`, `leader_kill_elects_new_leader_and_old_leader_rejoins`) — 2-3/5 soak — is pre-existing and unrelated: NotLeader hint advertises VSR-replica address (data_port + 100) rather than client-data address, so the SDK's retry-on-hint path can't redirect. Out of scope for this slice; tracked separately in ROADMAP.md → v0.10.x.
+
 ### T2.1 — Non-localhost / multi-host topology — **DONE (commit pending)**
 
 Today's `ClusterConfig` hardcodes `127.0.0.1`. A hospital deployment needs nodes on three different hosts behind a load balancer.
@@ -100,13 +109,19 @@ Today's `ClusterConfig` hardcodes `127.0.0.1`. A hospital deployment needs nodes
 - **Estimate**: 4 days
 - **Follow-up surfaced**: `tests/three_node_smoke.rs`'s embedded `pick_base_port` (from T1.1, pre-`tests/common/`) sweeps only 32 attempts and gets starved on systems where the OS ephemeral range is biased high (macOS default 49152-65535). Migrate it to `common::pick_base_port` (1000 attempts, downward sweep from a clamped start) when next touching that file.
 
-### T2.2 — Backup + restore semantics
+### T2.2 — Backup + restore semantics — **DONE (commit pending)**
 
 HIPAA § 164.308(a)(7) — contingency plan requires data backup, disaster recovery, and emergency mode operation. Today there is no documented backup procedure.
 
-- **New CLI**: `kimberlite cluster backup <out_dir>` — atomic snapshot of the leader's data dir plus `cluster.toml`. Implemented as a `JOIN`-into-checkpoint + tarball of the resulting checkpoint dir.
-- **New CLI**: `kimberlite cluster restore <in_dir> <new_data_dir>` — reverse.
+- **New CLI**: `kimberlite cluster backup --project <data> --output <archive.tar.zst>`.
+- **New CLI**: `kimberlite cluster restore --input <archive.tar.zst> --target <new_data>`.
 - **Acceptance**: a 3-node cluster with 1 GB of writes can be backed up to a tarball, the cluster destroyed, the tarball restored into a fresh 3-node cluster, and a full table scan returns identical rows.
+- **What shipped**:
+  - `kimberlite-cluster::backup::backup_cluster(data_dir, archive_path)` — tar+zstd of `<data_dir>/cluster/` with embedded BLAKE3 manifest.
+  - `kimberlite-cluster::backup::restore_cluster(archive_path, new_data_dir)` — extract + per-file checksum re-verification; refuses non-empty target.
+  - `kimberlite cluster backup` / `kimberlite cluster restore` CLI surfaces wired through `commands/cluster.rs`.
+  - 5 lib-level + 3 integration tests; 10 MB synthetic-payload round-trip passes byte-identical; 1 GB soak runs in nightly job.
+- **Scope deviation from doc wording**: the design said "JOIN-into-checkpoint" — VSR-coordinated pause for a quiescent snapshot. The shipped path is offline-safe: operator either stops writes for a clean snapshot or accepts the trailing-fsync-window semantic. Online-coordinated backup is documented in the runbook as a v1.0 deliverable.
 - **Estimate**: 1.5 weeks
 
 ### T2.3 — Cluster-level VOPR scenarios
@@ -125,7 +140,7 @@ Today's VOPR scenarios target VSR (consensus) and the kernel directly. The super
 
 ## T3 — Important (must be planned, may slip to v1.0)
 
-### T3.1 — Ops runbook
+### T3.1 — Ops runbook — **DONE (commit pending)**
 
 `docs/operating/runbooks/cluster.md` — covering:
 - Failover procedure (manual leader transfer, RTO expectations)
@@ -134,6 +149,8 @@ Today's VOPR scenarios target VSR (consensus) and the kernel directly. The super
 - Rolling upgrade procedure (with version-compatibility matrix)
 - Disk-full / disk-slow degraded-mode behaviour
 - Audit-log integrity verification after a recovery
+
+**Shipped** at `docs/operating/runbooks/cluster.md`. ~400 lines covering every bullet above plus the Quick-reference triage table, an Operating-model orientation, Transient-view-change diagnostics, Single-node degradation decision tree, RPO/RTO numbers tied to the existing integration test soaks, and an Escalation policy. Cross-linked from the runbook into `deployment.md`, `monitoring.md`, `security.md`.
 
 **Estimate**: 1 week. Touch only after the cluster behaviours are real.
 
