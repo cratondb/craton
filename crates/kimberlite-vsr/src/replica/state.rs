@@ -645,9 +645,30 @@ impl ReplicaState {
         self.log.get(index)
     }
 
-    /// Returns true if this replica is the leader for the current view.
+    /// Returns true if this replica is the leader-of-record for the current
+    /// view number — a pure view-table lookup with no status check.
+    ///
+    /// Used by the protocol layer where the question is "whose view is
+    /// this?" (prepare authoring, view-change message routing). For
+    /// observability and external "is this replica acting as leader right
+    /// now?" predicates, prefer [`Self::is_acting_leader`] — during a view
+    /// change two replicas can transiently answer `true` here (the
+    /// outgoing primary still owns view N while the incoming primary is
+    /// already starting view N+1), which the strict variant rules out.
     pub fn is_leader(&self) -> bool {
         self.config.leader_for_view(self.view) == self.replica_id
+    }
+
+    /// Returns true if this replica is the leader of the current view AND
+    /// is in `Normal` status — i.e. it is actually acting as leader right
+    /// now, not mid-view-change.
+    ///
+    /// This is the predicate observability (`kimberlite_is_leader` gauge),
+    /// submit-side gating, and `/readyz` should use: it answers the
+    /// operational question "should this node take writes?" rather than
+    /// the protocol question "who owns view N?".
+    pub fn is_acting_leader(&self) -> bool {
+        self.status == ReplicaStatus::Normal && self.is_leader()
     }
 
     /// Returns the leader for the current view.
@@ -657,7 +678,10 @@ impl ReplicaState {
 
     /// Returns true if the replica can process client requests.
     pub fn can_accept_requests(&self) -> bool {
-        self.status == ReplicaStatus::Normal && self.is_leader()
+        // Same composition as [`Self::is_acting_leader`] — kept under its
+        // original name because the accept-side call sites read more
+        // naturally as "can_accept_requests()".
+        self.is_acting_leader()
     }
 
     // ========================================================================
@@ -1812,6 +1836,53 @@ mod tests {
         // In view 1, replica 1 is leader
         assert!(!r0.is_leader());
         assert!(r1.is_leader());
+    }
+
+    #[test]
+    fn is_acting_leader_false_during_view_change() {
+        // `is_leader()` is a pure view-table lookup, so during a view
+        // change the incoming primary already answers `true` even though
+        // its status is `ViewChange`. `is_acting_leader()` is the strict
+        // predicate observability + submit-side gating should use: it
+        // requires `Normal` status, so it stays `false` until the new
+        // primary lands `StartView`. This pins the contract the
+        // `kimberlite_is_leader` gauge depends on.
+        let config = test_config_3();
+        let r1 = ReplicaState::new(ReplicaId::new(1), config);
+        // View 0: replica 1 is a follower. Neither predicate fires.
+        assert!(!r1.is_leader());
+        assert!(!r1.is_acting_leader());
+
+        // View 1: replica 1 owns the view but status is ViewChange.
+        let r1 = r1.transition_to_view(ViewNumber::new(1));
+        assert_eq!(r1.status(), ReplicaStatus::ViewChange);
+        assert!(r1.is_leader(), "view-table says yes");
+        assert!(
+            !r1.is_acting_leader(),
+            "but is_acting_leader must reject ViewChange"
+        );
+        assert!(
+            !r1.can_accept_requests(),
+            "and can_accept_requests must agree"
+        );
+    }
+
+    #[test]
+    fn is_acting_leader_true_after_view_settles() {
+        // Sanity counterpart to `is_acting_leader_false_during_view_change`:
+        // once we restore Normal status (e.g. after `StartView` lands),
+        // the strict predicate flips true on the view-table leader.
+        let config = test_config_3();
+        let mut r1 = ReplicaState::new(ReplicaId::new(1), config).transition_to_view(
+            ViewNumber::new(1),
+        );
+        // Hand-restore Normal — the real protocol path runs through
+        // start_view machinery, but the predicate only reads `status`.
+        r1.status = ReplicaStatus::Normal;
+
+        assert!(r1.is_leader());
+        assert!(r1.is_acting_leader());
+        assert!(r1.can_accept_requests());
     }
 
     #[test]

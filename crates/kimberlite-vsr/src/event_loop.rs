@@ -1017,12 +1017,19 @@ impl<S: Read + Write + Seek> EventLoop<S> {
     }
 
     /// Updates the shared state from the replica state.
+    ///
+    /// `is_leader` here uses the strict [`ReplicaState::is_acting_leader`]
+    /// predicate — `Normal && view-leader`. This is what every external
+    /// observer ("am I primary right now?") wants: a transient view-change
+    /// must not surface as `is_leader=1` on more than one replica, which
+    /// is what the pure view-table check would let happen for a few hundred
+    /// milliseconds between `StartViewChange` and `StartView`.
     fn update_shared_state(&self) {
         if let Ok(mut state) = self.shared_state.write() {
             state.view = self.replica_state.view();
             state.commit_number = self.replica_state.commit_number();
             state.status = self.replica_state.status();
-            state.is_leader = self.replica_state.is_leader();
+            state.is_leader = self.replica_state.is_acting_leader();
             state.connected_peers = self.transport.connected_count();
             // Track the leader ID for the current view
             state.leader_id = Some(self.replica_state.leader());
