@@ -18,7 +18,12 @@ pub struct ClusterSupervisor {
 }
 
 impl ClusterSupervisor {
-    /// Creates a new cluster supervisor.
+    /// Creates a new cluster supervisor that manages every node locally.
+    ///
+    /// This is the localhost-development path: one supervisor process owns
+    /// all N children. For multi-host deployments, use [`Self::for_node`]
+    /// so each box's supervisor only owns the entry that resolves to its
+    /// own IP.
     pub fn new(config: ClusterConfig) -> Self {
         let mut nodes = HashMap::new();
 
@@ -32,6 +37,36 @@ impl ClusterSupervisor {
             nodes,
             running: false,
         }
+    }
+
+    /// Creates a supervisor that manages exactly one local node.
+    ///
+    /// The full [`ClusterConfig`] is still kept (`KMB_CLUSTER_PEERS`
+    /// rendering needs every peer's address) but [`Self::start_all`] and
+    /// [`Self::monitor_loop`] will only operate on `local_node_id` — the
+    /// other entries describe remote peers managed by *their* supervisors.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NodeIdOutOfRange`] if `local_node_id` is not in
+    /// `cluster.toml`.
+    pub fn for_node(config: ClusterConfig, local_node_id: usize) -> Result<Self> {
+        let node_config = config
+            .get_node(local_node_id)
+            .ok_or(Error::NodeIdOutOfRange {
+                requested: local_node_id,
+                node_count: config.node_count,
+            })?
+            .clone();
+
+        let mut nodes = HashMap::new();
+        nodes.insert(local_node_id, NodeProcess::new(node_config));
+
+        Ok(Self {
+            config,
+            nodes,
+            running: false,
+        })
     }
 
     /// Starts all nodes in the cluster.
@@ -269,6 +304,50 @@ mod tests {
         // All should be stopped initially
         for (_, node_status, _) in status {
             assert_eq!(node_status, NodeStatus::Stopped);
+        }
+    }
+
+    #[tokio::test]
+    async fn for_node_owns_single_entry_and_remembers_full_topology() {
+        let temp = TempDir::new().unwrap();
+        let config = ClusterConfig::try_new_with_hosts(
+            temp.path().to_path_buf(),
+            &["10.0.1.5", "10.0.1.6", "10.0.1.7"],
+            5432,
+        )
+        .unwrap();
+
+        let mut supervisor = ClusterSupervisor::for_node(config, 1).unwrap();
+
+        // Only the local node is owned by THIS supervisor's status loop.
+        let status = supervisor.status();
+        assert_eq!(status.len(), 1);
+        assert_eq!(status[0].0, 1);
+
+        // But the supervisor still knows about all 3 peers — the spawned
+        // child needs the full `KMB_CLUSTER_PEERS` rendering.
+        assert_eq!(supervisor.config().node_count, 3);
+        assert_eq!(supervisor.config().topology.nodes.len(), 3);
+
+        // The single owned NodeProcess carries node 1's bind address.
+        let owned = supervisor.node(1).unwrap();
+        assert_eq!(owned.config.bind_address, "10.0.1.6");
+    }
+
+    #[tokio::test]
+    async fn for_node_rejects_out_of_range_id() {
+        let temp = TempDir::new().unwrap();
+        let config = ClusterConfig::new(temp.path().to_path_buf(), 3, 5432);
+        match ClusterSupervisor::for_node(config, 7) {
+            Ok(_) => panic!("expected NodeIdOutOfRange"),
+            Err(Error::NodeIdOutOfRange {
+                requested,
+                node_count,
+            }) => {
+                assert_eq!(requested, 7);
+                assert_eq!(node_count, 3);
+            }
+            Err(other) => panic!("expected NodeIdOutOfRange, got {other:?}"),
         }
     }
 }

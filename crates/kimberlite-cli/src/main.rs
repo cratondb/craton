@@ -272,17 +272,37 @@ enum TenantCommands {
 enum ClusterCommands {
     /// Initialize a new cluster configuration.
     Init {
-        /// Number of nodes.
+        /// Number of nodes. Ignored when `--host` is provided (node
+        /// count is then `hosts.len()`).
         #[arg(short, long, default_value = "3")]
         nodes: u32,
+
+        /// Per-node host (routable IP or DNS name). Pass once per node
+        /// in node-id order for a multi-host topology, e.g.
+        /// `--host 10.0.1.5 --host 10.0.1.6 --host 10.0.1.7`. Omitted
+        /// for a localhost cluster.
+        #[arg(long = "host", value_name = "HOST")]
+        hosts: Vec<String>,
 
         /// Project directory.
         #[arg(short, long, default_value = ".")]
         project: String,
     },
 
-    /// Start all cluster nodes.
+    /// Start cluster nodes locally.
+    ///
+    /// Without `--node-id`, every node in `cluster.toml` is spawned on
+    /// this host — the localhost-development path. With `--node-id N`,
+    /// only entry `N` is spawned; the other entries describe peers
+    /// running on other hosts. This is the multi-host deployment path:
+    /// each operator runs the same command on their box with the matching
+    /// `--node-id`.
     Start {
+        /// Spawn only this node id locally. Required for multi-host
+        /// topologies; omit it for localhost clusters.
+        #[arg(long)]
+        node_id: Option<u32>,
+
         /// Project directory.
         #[arg(short, long, default_value = ".")]
         project: String,
@@ -620,8 +640,14 @@ async fn main() -> Result<()> {
             TenantCommands::Info { id, server } => commands::tenant::info(&server, id),
         },
         Commands::Cluster(cmd) => match cmd {
-            ClusterCommands::Init { nodes, project } => commands::cluster::init(nodes, &project),
-            ClusterCommands::Start { project } => commands::cluster::start(&project).await,
+            ClusterCommands::Init {
+                nodes,
+                hosts,
+                project,
+            } => commands::cluster::init(nodes, &hosts, &project),
+            ClusterCommands::Start { node_id, project } => {
+                commands::cluster::start(node_id, &project).await
+            }
             ClusterCommands::Stop { node, project } => {
                 commands::cluster::stop(node, &project).await
             }

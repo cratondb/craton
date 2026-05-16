@@ -46,6 +46,35 @@ pub enum Error {
     #[error("Invalid port range: base={0}, nodes={1}")]
     InvalidPortRange(u16, usize),
 
+    /// Empty host list passed to a multi-host constructor.
+    #[error("Hosts list must be non-empty")]
+    EmptyHosts,
+
+    /// Two nodes claim the same `(host, port)` tuple — VSR's transport
+    /// will fight for the same bind socket and the cluster never reaches
+    /// quorum. Caught at config-build time rather than at child spawn so
+    /// the operator sees the collision in `cluster.toml` validation.
+    #[error("Duplicate (host, port) tuple {host}:{port} on nodes {first} and {second}")]
+    DuplicateEndpoint {
+        /// Host that collides.
+        host: String,
+        /// Port that collides (data, VSR, or HTTP-sidecar).
+        port: u16,
+        /// Lower-indexed node holding the tuple.
+        first: usize,
+        /// Higher-indexed node colliding with `first`.
+        second: usize,
+    },
+
+    /// `--node-id` selected an entry that doesn't exist in `cluster.toml`.
+    #[error("Node id {requested} out of range (cluster has {node_count} nodes)")]
+    NodeIdOutOfRange {
+        /// Index the operator asked for.
+        requested: usize,
+        /// Total nodes declared in `cluster.toml`.
+        node_count: usize,
+    },
+
     /// TOML deserialization error.
     #[error("TOML error: {0}")]
     Toml(#[from] toml::de::Error),

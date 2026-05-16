@@ -1,5 +1,6 @@
 //! Node process management.
 
+use crate::config::{HTTP_PORT_OFFSET, VSR_PORT_OFFSET as CONFIG_VSR_PORT_OFFSET};
 use crate::{Error, NodeConfig, Result};
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -102,9 +103,10 @@ impl NodeProcess {
             );
             command.env("KMB_REPLICA_ID", self.config.id.to_string());
             command.env("KMB_CLUSTER_PEERS", peers_env);
-            // Bind the HTTP sidecar at data_port + 1000 so probes are
-            // reachable per node without colliding with peer data ports.
-            let http_port = self.config.port.saturating_add(1000);
+            // Bind the HTTP sidecar at `data_port + HTTP_PORT_OFFSET` so
+            // probes are reachable per node without colliding with peer
+            // data ports.
+            let http_port = self.config.port.saturating_add(HTTP_PORT_OFFSET);
             command.env("KMB_HTTP_PORT", http_port.to_string());
             // Drive follower projections so cross-node reads see leader
             // writes — without this the projection layer is leader-only.
@@ -299,7 +301,12 @@ pub fn locate_kimberlite_binary() -> Result<PathBuf> {
 ///
 /// Concretely: data port `15432` → VSR port `15532`, HTTP probe port
 /// `16432`. Three nodes on consecutive bases occupy 9 distinct ports.
-pub const VSR_PORT_OFFSET: u16 = 100;
+///
+/// Re-export of [`crate::config::VSR_PORT_OFFSET`] so legacy `use
+/// kimberlite_cluster::node::VSR_PORT_OFFSET` paths keep working — the
+/// canonical source of the constant now lives in `config` because
+/// [`crate::config::ClusterConfig::validate`] needs to reason about it.
+pub const VSR_PORT_OFFSET: u16 = CONFIG_VSR_PORT_OFFSET;
 
 /// Renders the `KMB_CLUSTER_PEERS` env value (`0=host:port,1=host:port,...`)
 /// using VSR ports rather than data ports.

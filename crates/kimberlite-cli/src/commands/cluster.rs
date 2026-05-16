@@ -2,7 +2,10 @@
 
 use anyhow::{Context, Result};
 use comfy_table::{Cell, Color, Table, presets::UTF8_FULL};
-use kimberlite_cluster::{ClusterConfig, NodeStatus, init_cluster, start_cluster};
+use kimberlite_cluster::{
+    ClusterConfig, NodeStatus, init_cluster, init_cluster_with_hosts, start_cluster,
+    start_cluster_node,
+};
 use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
 use std::time::Duration;
@@ -10,24 +13,38 @@ use std::time::Duration;
 use crate::style::{self, colors::SemanticStyle, create_spinner, finish_success};
 
 /// Initialize a new cluster.
-pub fn init(nodes: u32, project: &str) -> Result<()> {
-    println!(
-        "Initializing {}-node cluster in {}...",
-        nodes,
-        project.code()
-    );
-
-    if nodes == 0 {
-        return Err(anyhow::anyhow!("Node count must be >= 1"));
-    }
-
+///
+/// When `hosts` is empty, all nodes are colocated on `127.0.0.1` (the
+/// localhost-dev path). When `hosts` is non-empty, it declares one
+/// routable address per node and `nodes` is ignored — the operator's
+/// intent is encoded in the host list directly.
+pub fn init(nodes: u32, hosts: &[String], project: &str) -> Result<()> {
     let project_path = Path::new(project);
     let data_dir = project_path.to_path_buf();
 
     let spinner = create_spinner("Creating cluster configuration...");
 
-    let config = init_cluster(data_dir, nodes as usize, 5432)
-        .with_context(|| "Failed to initialize cluster")?;
+    let config = if hosts.is_empty() {
+        if nodes == 0 {
+            return Err(anyhow::anyhow!("Node count must be >= 1"));
+        }
+        println!(
+            "Initializing {}-node localhost cluster in {}...",
+            nodes,
+            project.code()
+        );
+        init_cluster(data_dir, nodes as usize, 5432)
+            .with_context(|| "Failed to initialize cluster")?
+    } else {
+        println!(
+            "Initializing {}-node multi-host cluster ({}) in {}...",
+            hosts.len(),
+            hosts.join(", "),
+            project.code()
+        );
+        init_cluster_with_hosts(data_dir, hosts, 5432)
+            .with_context(|| "Failed to initialize cluster")?
+    };
 
     finish_success(&spinner, "Cluster initialized");
 
@@ -43,31 +60,44 @@ pub fn init(nodes: u32, project: &str) -> Result<()> {
 
     for node in &config.topology.nodes {
         println!(
-            "  Node {} → Port {} ({})",
+            "  Node {} → {}:{} ({})",
             node.id,
+            node.bind_address,
             node.port,
             node.data_dir.display().to_string().muted()
         );
     }
 
     println!();
-    println!("Start the cluster with:");
-    println!("  {} cluster start", "kimberlite".code());
+    if hosts.is_empty() {
+        println!("Start the cluster with:");
+        println!("  {} cluster start", "kimberlite".code());
+    } else {
+        println!("Start each node from its own host:");
+        for node in &config.topology.nodes {
+            println!(
+                "  {} cluster start --node-id {}   {}",
+                "kimberlite".code(),
+                node.id,
+                format!("(on {})", node.bind_address).muted()
+            );
+        }
+    }
 
     Ok(())
 }
 
 /// Start the cluster.
 ///
-/// Spawns all node processes and enters a supervision loop. The supervisor
-/// monitors node health and auto-restarts crashed nodes. Press Ctrl+C to
-/// stop all nodes and exit.
-pub async fn start(project: &str) -> Result<()> {
-    println!("Starting cluster in {}...", project.code());
-
+/// `node_id == None` brings every entry up locally (the localhost-dev path).
+/// `node_id == Some(N)` spawns only entry `N` on this host and treats the
+/// rest as remote peers — this is the multi-host deployment path. In both
+/// modes the supervisor enters a monitor loop that auto-restarts crashed
+/// children with bounded backoff until the operator hits Ctrl+C.
+pub async fn start(node_id: Option<u32>, project: &str) -> Result<()> {
     let project_path = Path::new(project);
 
-    // Verify cluster is initialized
+    // Verify cluster is initialized before we promise to spawn anything.
     let _ = ClusterConfig::load(project_path).with_context(|| {
         format!(
             "Cluster not initialized. Run: {} cluster init",
@@ -77,14 +107,33 @@ pub async fn start(project: &str) -> Result<()> {
 
     let spinner = create_spinner("Starting cluster nodes...");
 
-    let mut supervisor = start_cluster(project_path.to_path_buf())
-        .await
-        .with_context(|| "Failed to start cluster")?;
+    let mut supervisor = match node_id {
+        Some(id) => {
+            println!(
+                "Starting node {} only in {}...",
+                id,
+                project.code()
+            );
+            start_cluster_node(project_path.to_path_buf(), id as usize)
+                .await
+                .with_context(|| "Failed to start cluster node")?
+        }
+        None => {
+            println!("Starting cluster in {}...", project.code());
+            start_cluster(project_path.to_path_buf())
+                .await
+                .with_context(|| "Failed to start cluster")?
+        }
+    };
 
     let running = supervisor.running_count();
     let total = supervisor.config().node_count;
+    let owned = supervisor.status().len();
 
-    finish_success(&spinner, &format!("{running}/{total} nodes started"));
+    finish_success(
+        &spinner,
+        &format!("{running}/{owned} owned nodes running ({total} total in topology)"),
+    );
 
     println!();
     for (id, status, port) in supervisor.status() {
@@ -98,8 +147,13 @@ pub async fn start(project: &str) -> Result<()> {
     }
 
     println!();
+    let stop_hint = if node_id.is_some() {
+        "this node"
+    } else {
+        "all nodes"
+    };
     println!(
-        "Cluster running. Press {} to stop all nodes.",
+        "Cluster running. Press {} to stop {stop_hint}.",
         "Ctrl+C".code()
     );
     println!();

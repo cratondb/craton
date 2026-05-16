@@ -82,14 +82,23 @@ Test coverage today is unit-only; the supervisor's restart logic has never been 
 
 ## T2 — Critical (should ship in v0.9.x — slip-to-v0.10 is OK only with stated risk)
 
-### T2.1 — Non-localhost / multi-host topology
+### T2.1 — Non-localhost / multi-host topology — **DONE (commit pending)**
 
 Today's `ClusterConfig` hardcodes `127.0.0.1`. A hospital deployment needs nodes on three different hosts behind a load balancer.
 
 - **File**: `crates/kimberlite-cluster/src/config.rs`
 - **Change**: `NodeConfig` already has a host field; verify it propagates through `start_cluster()` to the spawned process's `--listen` / `--peer` arguments. Add validation that all 3 nodes' (host, port) tuples are unique.
 - **Acceptance**: a `cluster.toml` declaring 3 nodes on three different IPs spins up successfully when the operator launches `kimberlite cluster start` on each host (with `--node-id <0|1|2>` selecting which entry to bring up locally).
+- **What shipped**:
+  - `ClusterConfig::try_new_with_hosts(data_dir, hosts, base_port)` — per-node bind address.
+  - `ClusterConfig::validate()` — checks `(host, port)` uniqueness across data / VSR / HTTP ports; called on `load()` and on `try_new_with_hosts()`.
+  - `ClusterSupervisor::for_node(config, node_id)` — owns one local entry, keeps full peer topology for `KMB_CLUSTER_PEERS` rendering.
+  - `start_cluster_node(data_dir, node_id)` lib-level helper.
+  - `kimberlite cluster init --host a --host b --host c` and `kimberlite cluster start --node-id N` CLI surfaces.
+  - `tests/multi_host_topology.rs` — end-to-end test of the multi-host code path (5/5 soak on localhost).
+  - Pre-existing `VSR_PORT_OFFSET=100` / new `HTTP_PORT_OFFSET=1000` promoted to canonical constants in `crate::config`.
 - **Estimate**: 4 days
+- **Follow-up surfaced**: `tests/three_node_smoke.rs`'s embedded `pick_base_port` (from T1.1, pre-`tests/common/`) sweeps only 32 attempts and gets starved on systems where the OS ephemeral range is biased high (macOS default 49152-65535). Migrate it to `common::pick_base_port` (1000 attempts, downward sweep from a clamped start) when next touching that file.
 
 ### T2.2 — Backup + restore semantics
 
