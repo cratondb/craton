@@ -77,14 +77,20 @@ There is **no operator-initiated leader transfer command in v0.9.x.** The protoc
 
 ### RTO expectations
 
-| Event | RTO |
-|---|---|
-| Leader process crash | ≤ 5 s (election timeout + new-leader settle) |
-| Leader host kernel panic | ≤ 5 s (same) |
-| Leader network partition | ≤ 5 s (same; the leader self-abdicates when partitioned) |
-| Cluster cold-start (all 3 nodes down) | ≤ 15 s (leader recovers superblock + waits for quorum) |
+| Event | RTO target | v0.9.x measured (n=8, loopback) |
+|---|---|---|
+| Leader process crash | ≤ 5 s (election timeout + new-leader settle) | p50 ≈ 1.04 s, p99 ≈ 1.05 s |
+| Leader host kernel panic | ≤ 5 s (same) | not measured (assumed ≥ process crash) |
+| Leader network partition | ≤ 5 s (same; the leader self-abdicates when partitioned) | not measured |
+| Cluster cold-start (all 3 nodes down) | ≤ 15 s (leader recovers superblock + waits for quorum) | not measured |
 
-These numbers come from `tests/three_node_integration.rs::leader_kill_*` and `tests/http_probes.rs::leader_kill_flips_follower_readyz_within_5s`. Re-run those in your environment to baseline.
+The "v0.9.x measured" column comes from `docs/operating/performance/cluster.md` — measured user-observable RTO from `tests/perf_baseline.rs::perf_rto_leader_kill` on dev hardware. The five-second target is the SLO budget; the measured number is the loopback baseline, which leaves ~5× headroom for production network jitter. Re-run the baseline harness in your own environment before publishing SLOs:
+
+```bash
+KIMBERLITE_BIN=target/release/kimberlite \
+  cargo test --release -p kimberlite-cluster --test perf_baseline \
+  -- --ignored --nocapture --test-threads=1 perf_rto
+```
 
 ---
 
@@ -162,9 +168,11 @@ If hosts can't be recovered and you must restore service, the surviving replica'
 
 ### RPO expectations
 
-- Quorum maintained throughout: **RPO = 0** (no committed entry can be lost — VSR safety property, formally verified).
+- Quorum maintained throughout: **RPO = 0** (no committed entry can be lost — VSR safety property, formally verified). The v0.9.x baseline measured this directly: 7 of 8 leader-kill iterations completed, all with 100 acked writes pre-kill and 100 readable post-kill. The one stalled iteration is a view-change availability issue (see [the cluster perf doc](../performance/cluster.md#known-limitation-view-change-stall-under-post-write-leader-kill)), not a data-loss event.
 - Quorum lost, surviving replica's log is the latest: **RPO = trailing-write-window of failed replicas** (typically sub-second).
 - Quorum lost, no recoverable surviving log: **RPO = age of the most recent backup**.
+
+For reproducible RPO measurement, see `docs/operating/performance/cluster.md` and the harness in `crates/kimberlite-cluster/tests/perf_baseline.rs::perf_rpo_leader_kill`.
 
 ---
 

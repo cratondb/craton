@@ -18,6 +18,46 @@ user-facing narrative.
 _Accretion slot for v0.9.0 work. See [`ROADMAP.md`](./ROADMAP.md)
 for planned scope._
 
+### Added — v0.9.x cluster graduation T3.2
+
+- **Measured RTO + RPO baseline** for the 3-node cluster, published
+  in `docs/operating/performance/cluster.md`. Headline numbers from
+  the dev-hardware loopback run (n=8 iterations): user-observable
+  RTO p99 ≈ **1.05 s** (target 5 s, ~5× headroom), RPO **= 0 events**
+  across all completed iterations — confirming the VSR safety
+  property holds end-to-end. Single-writer sustained throughput
+  baseline: ~75 events/s, p50 latency ~11 ms, p99 ~23 ms (256-byte
+  payloads, no batching, no concurrency).
+- **`crates/kimberlite-cluster/tests/perf_baseline.rs`** — the
+  reproducible harness behind the doc. Three `#[ignore]`-tagged
+  tests (`perf_rto_leader_kill`, `perf_rpo_leader_kill`,
+  `perf_sustained_write_throughput`) that boot a real 3-node cluster
+  against the built `kimberlite` binary, drive a real client, and
+  emit labelled distributions. Iteration count and run length are
+  env-tunable (`KIMBERLITE_PERF_ITERATIONS`, `KIMBERLITE_PERF_SECS`).
+- **Shared testing helpers promoted to `kimberlite_cluster::testing`**
+  (`#[doc(hidden)]` public module). `crates/kimberlite-cluster/src/testing.rs`
+  is now the source of truth for port-band reservation, binary
+  discovery, HTTP/1.1 polling, and Prometheus gauge parsing;
+  `tests/common/mod.rs` is a thin re-export shim. `tests/three_node_smoke.rs`
+  migrated off its embedded `pick_base_port` / `wait_for_tcp_ready`
+  duplicates — closes the T2.1 follow-up flake risk noted in the
+  cluster graduation plan.
+- **`docs/operating/runbooks/cluster.md`** RTO and RPO sections
+  back-linked to the new perf doc; runbook's "≤ 5 s" targets now
+  appear alongside the measured "p99 ≈ 1.05 s" baseline.
+
+### Known limitation (v0.9.x)
+
+- Under sustained-write leader kill (100 acked writes then
+  SIGKILL'ing the leader), ~1 in 8 iterations on Apple Silicon dev
+  hardware shows a view-change stall (> 20 s without a new leader
+  elected). Self-recovers; not a data-loss event. Same root cause
+  family as the deferred "rolling restart of all 3 nodes" scenario
+  in `tests/three_node_integration.rs::single_node_restart_preserves_writes`
+  — tracked for v0.10.x alongside the HTTP-sidecar / mio fairness
+  work.
+
 ### Added — v0.9.x cluster graduation T1.3
 
 - **4 new failure-mode integration scenarios** in
