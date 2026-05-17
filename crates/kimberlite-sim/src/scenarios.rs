@@ -886,19 +886,19 @@ impl ScenarioType {
                 "Consent withdrawal during in-flight research queries; in-flight queries see pre-revocation snapshot, new queries see empty, audit chain links Withdrawn → ErasureRequested → ProjectionRowsPurge. (Q2 scaffold)"
             }
             Self::ClusterNodeProcessCrash => {
-                "SIGKILL a follower's subprocess; supervisor restarts with bounded backoff and audits every attempt; other N-1 nodes remain writable. (Q2 cluster scaffold)"
+                "SIGKILL a follower's subprocess; supervisor restarts with bounded backoff and audits every attempt; other N-1 nodes remain writable. (v0.9.x cluster scenario)"
             }
             Self::ClusterCascadingNodeFailure => {
-                "N-1 nodes crash in rapid sequence; cluster blocks writes but loses no committed entries; recovery preserves pre-cascade log in order. (Q2 cluster scaffold)"
+                "N-1 nodes crash in rapid sequence; cluster blocks writes but loses no committed entries; recovery preserves pre-cascade log in order. (v0.9.x cluster scenario)"
             }
             Self::ClusterHealthCheckTimeout => {
-                "Node process hangs without crashing; /readyz flips red within timeout, supervisor escalates to forced restart, view change elects new leader if the hung node was primary. (Q2 cluster scaffold)"
+                "Node process hangs without crashing; /readyz flips red within timeout, supervisor escalates to forced restart, view change elects new leader if the hung node was primary. (v0.9.x cluster scenario)"
             }
             Self::ClusterConfigReloadUnderLoad => {
-                "cluster.toml updated mid-write; supervisor applies new config without losing in-flight writes or dropping VSR view; quorum-shrinking reloads rejected. (Q2 cluster scaffold)"
+                "cluster.toml updated mid-write; supervisor applies new config without losing in-flight writes or dropping VSR view; quorum-shrinking reloads rejected. (v0.9.x cluster scenario)"
             }
             Self::ClusterRollingRestartFullCluster => {
-                "Rolling restart sequenced across all N nodes; cluster writable throughout with quorum preserved; every pre-restart committed entry survives at the same offset. (Q2 cluster scaffold)"
+                "Rolling restart sequenced across all N nodes; cluster writable throughout with quorum preserved; every pre-restart committed entry survives at the same offset. (v0.9.x cluster scenario)"
             }
         }
     }
@@ -955,14 +955,6 @@ impl ScenarioType {
                 | Self::ClaimsBatchReconciliation
                 | Self::BreakGlassUnderLoad
                 | Self::ConsentRevocationCascade
-                // Q2 — Cluster supervisor scenarios. Drivers ship as the
-                // graduation T1.* work (real subprocess spawn + HTTP
-                // health endpoints) lands.
-                | Self::ClusterNodeProcessCrash
-                | Self::ClusterCascadingNodeFailure
-                | Self::ClusterHealthCheckTimeout
-                | Self::ClusterConfigReloadUnderLoad
-                | Self::ClusterRollingRestartFullCluster
         )
     }
 
@@ -1243,15 +1235,17 @@ impl ScenarioConfig {
                 Self::aspirational_v07(scenario_type)
             }
 
-            // Q2 — Cluster supervisor scenarios. Same baseline-scaffold
-            // until T1.* of the graduation plan ships the supervisor
-            // drivers.
-            ScenarioType::ClusterNodeProcessCrash
-            | ScenarioType::ClusterCascadingNodeFailure
-            | ScenarioType::ClusterHealthCheckTimeout
-            | ScenarioType::ClusterConfigReloadUnderLoad
-            | ScenarioType::ClusterRollingRestartFullCluster => {
-                Self::aspirational_v07(scenario_type)
+            // Q2 (v0.9.x) — Cluster supervisor scenarios. Each driver
+            // expresses the fault shape the real `kimberlite-cluster`
+            // supervisor would surface to the replicated log under the
+            // canary contract in `description()`. Promoted out of the
+            // aspirational set as part of the T2.3 driver pass.
+            ScenarioType::ClusterNodeProcessCrash => Self::cluster_node_process_crash(),
+            ScenarioType::ClusterCascadingNodeFailure => Self::cluster_cascading_node_failure(),
+            ScenarioType::ClusterHealthCheckTimeout => Self::cluster_health_check_timeout(),
+            ScenarioType::ClusterConfigReloadUnderLoad => Self::cluster_config_reload_under_load(),
+            ScenarioType::ClusterRollingRestartFullCluster => {
+                Self::cluster_rolling_restart_full_cluster()
             }
         }
     }
@@ -3290,6 +3284,183 @@ impl ScenarioConfig {
         }
     }
 
+    // ========================================================================
+    // Q2 (v0.9.x) — Cluster supervisor scenarios. Sibling to the VSR
+    // consensus scenarios above. The in-process VOPR runtime does not
+    // model an OS-level process supervisor, so these drivers express
+    // the same fault shapes the real `kimberlite-cluster` supervisor
+    // would experience — one or more replicas going dark, hanging,
+    // or being restarted in sequence — and rely on the existing VSR
+    // invariants (offset monotonicity, prefix property, durability,
+    // hash-chain integrity) to surface any violation. The canary
+    // contracts in `description()` describe the supervisor-level
+    // behaviour each driver stresses; the in-process drivers reproduce
+    // the *consequences* of those supervisor behaviours on the
+    // replicated log, which is where any safety regression would land.
+    // ========================================================================
+
+    /// Q2 (v0.9.x) cluster scenario: single-node process crash.
+    ///
+    /// Models the SIGKILL-then-supervisor-restart-with-bounded-backoff
+    /// path. One replica enters gray failure at a moderate rate
+    /// (≈ once per 5-7 simulated cycles) and recovers at a comparable
+    /// rate, mirroring the supervisor's restart-window cadence. Other
+    /// N-1 nodes stay healthy. Storage stays clean — the canary is
+    /// "leader keeps accepting writes through a follower crash", not
+    /// a disk failure.
+    fn cluster_node_process_crash() -> Self {
+        Self {
+            scenario_type: ScenarioType::ClusterNodeProcessCrash,
+            network_config: NetworkConfig {
+                min_delay_ns: 1_000_000,
+                max_delay_ns: 5_000_000,
+                drop_probability: 0.0,
+                duplicate_probability: 0.0,
+                max_in_flight: 1000,
+            },
+            storage_config: StorageConfig::default(),
+            swizzle_clogger: None,
+            // 15 % entry / 30 % recovery — single replica cycles through
+            // crash + restart without the whole cluster ever losing quorum.
+            gray_failure_injector: Some(GrayFailureInjector::new(0.15, 0.30)),
+            byzantine_injector: None,
+            num_tenants: 1,
+            time_compression_factor: 1.0,
+            max_time_ns: 20_000_000_000, // 20 s for multiple restart cycles
+            max_events: 25_000,
+        }
+    }
+
+    /// Q2 (v0.9.x) cluster scenario: cascading node failure.
+    ///
+    /// N-1 replicas go dark in rapid sequence; the cluster blocks new
+    /// writes but loses no committed entries. Aggressive gray-failure
+    /// entry (35 %) and low recovery (8 %) push multiple replicas
+    /// simultaneously into the failed state. Elevated network drop +
+    /// aggressive swizzle-clogging models the partition-during-cascade
+    /// shape the runbook's "quorum loss recovery" section covers.
+    fn cluster_cascading_node_failure() -> Self {
+        Self {
+            scenario_type: ScenarioType::ClusterCascadingNodeFailure,
+            network_config: NetworkConfig {
+                min_delay_ns: 1_000_000,
+                max_delay_ns: 20_000_000,
+                drop_probability: 0.15,
+                duplicate_probability: 0.02,
+                max_in_flight: 1000,
+            },
+            storage_config: StorageConfig::default(),
+            swizzle_clogger: Some(SwizzleClogger::aggressive()),
+            // High entry, slow recovery — multiple replicas down at once.
+            gray_failure_injector: Some(GrayFailureInjector::new(0.35, 0.08)),
+            byzantine_injector: None,
+            num_tenants: 1,
+            time_compression_factor: 1.0,
+            max_time_ns: 30_000_000_000, // 30 s — cascade + recovery window
+            max_events: 30_000,
+        }
+    }
+
+    /// Q2 (v0.9.x) cluster scenario: health-check timeout (node hangs).
+    ///
+    /// Models a node that stops servicing traffic without exiting — the
+    /// `/readyz` probe flips red, but the process is still alive so
+    /// systemd's `Restart=on-failure` doesn't fire. The canary contract
+    /// is "view change elects a new leader if the hung node was primary".
+    /// Very low recovery (3 %) keeps the hung node stuck; elevated network
+    /// latency models the hang surfacing as slow rather than absent
+    /// responses (the classic gray-failure shape).
+    fn cluster_health_check_timeout() -> Self {
+        Self {
+            scenario_type: ScenarioType::ClusterHealthCheckTimeout,
+            network_config: NetworkConfig {
+                min_delay_ns: 5_000_000,
+                max_delay_ns: 100_000_000, // 100 ms — "responding but late"
+                drop_probability: 0.05,
+                duplicate_probability: 0.0,
+                max_in_flight: 1000,
+            },
+            storage_config: StorageConfig::default(),
+            swizzle_clogger: Some(SwizzleClogger::mild()),
+            // Moderate entry, near-zero recovery — once a node hangs it
+            // stays hung until the supervisor escalates to forced restart.
+            gray_failure_injector: Some(GrayFailureInjector::new(0.20, 0.03)),
+            byzantine_injector: None,
+            num_tenants: 1,
+            time_compression_factor: 1.0,
+            max_time_ns: 25_000_000_000, // 25 s — view change + recovery
+            max_events: 20_000,
+        }
+    }
+
+    /// Q2 (v0.9.x) cluster scenario: config reload under load.
+    ///
+    /// Models `cluster.toml` being updated mid-write. The in-process
+    /// VOPR runtime doesn't reload config, so this driver expresses the
+    /// *consequence* the canary checks: no in-flight write loses
+    /// durability when the supervisor briefly perturbs the replica set.
+    /// Mild gray failures + elevated write load reproduce the
+    /// "supervisor stalled momentarily while applying new config" shape
+    /// the runbook's rolling-config-change section covers.
+    fn cluster_config_reload_under_load() -> Self {
+        Self {
+            scenario_type: ScenarioType::ClusterConfigReloadUnderLoad,
+            network_config: NetworkConfig {
+                min_delay_ns: 1_000_000,
+                max_delay_ns: 15_000_000,
+                drop_probability: 0.05, // Brief perturbation during reload
+                duplicate_probability: 0.01,
+                max_in_flight: 2000, // Higher in-flight to stress reload window
+            },
+            storage_config: StorageConfig {
+                // Light storage variability — writes durable through the
+                // reload window, fsync still completes.
+                min_write_latency_ns: 500_000,
+                max_write_latency_ns: 5_000_000,
+                min_read_latency_ns: 50_000,
+                max_read_latency_ns: 200_000,
+                ..Default::default()
+            },
+            swizzle_clogger: Some(SwizzleClogger::mild()),
+            gray_failure_injector: Some(GrayFailureInjector::new(0.08, 0.25)),
+            byzantine_injector: None,
+            num_tenants: 1,
+            time_compression_factor: 1.0,
+            max_time_ns: 20_000_000_000,
+            max_events: 30_000, // High event volume — many in-flight writes
+        }
+    }
+
+    /// Q2 (v0.9.x) cluster scenario: rolling restart of the full cluster.
+    ///
+    /// Models the operator's rolling-upgrade workflow: each node restarted
+    /// in sequence, leadership transferring along the way. Sustained
+    /// medium-rate gray-failure cycling (each node crashes and recovers
+    /// in turn) over a long simulated window. Cluster stays writable
+    /// throughout — every pre-restart committed entry must survive at
+    /// the same offset (the prefix-property invariant catches violations).
+    fn cluster_rolling_restart_full_cluster() -> Self {
+        Self {
+            scenario_type: ScenarioType::ClusterRollingRestartFullCluster,
+            network_config: NetworkConfig {
+                min_delay_ns: 1_000_000,
+                max_delay_ns: 10_000_000,
+                drop_probability: 0.02,
+                duplicate_probability: 0.0,
+                max_in_flight: 1000,
+            },
+            storage_config: StorageConfig::default(),
+            swizzle_clogger: None,
+            // Sustained moderate cycling — each node takes a turn down.
+            gray_failure_injector: Some(GrayFailureInjector::new(0.18, 0.22)),
+            byzantine_injector: None,
+            num_tenants: 1,
+            time_compression_factor: 1.0,
+            max_time_ns: 40_000_000_000, // 40 s — span N restart windows
+            max_events: 35_000,
+        }
+    }
+
     /// Applies time compression to a duration.
     #[allow(clippy::cast_sign_loss, clippy::cast_precision_loss)]
     pub fn compress_time(&self, duration_ns: u64) -> u64 {
@@ -3515,6 +3686,85 @@ mod tests {
         assert!(ScenarioType::all().contains(&ScenarioType::EraseSubjectWithCrash));
         assert!(!ScenarioType::EraseSubjectWithCrash.name().is_empty());
         assert!(!ScenarioType::EraseSubjectWithCrash.description().is_empty());
+    }
+
+    /// v0.9.x T2.3 — verifies all 5 cluster supervisor scenarios are
+    /// promoted out of the aspirational set, dispatched to real driver
+    /// methods (not `aspirational_v07`), and produce non-baseline
+    /// configs that surface the fault shapes the canary contracts
+    /// describe.
+    #[test]
+    fn test_cluster_scenarios_have_real_drivers() {
+        let cluster_scenarios = [
+            ScenarioType::ClusterNodeProcessCrash,
+            ScenarioType::ClusterCascadingNodeFailure,
+            ScenarioType::ClusterHealthCheckTimeout,
+            ScenarioType::ClusterConfigReloadUnderLoad,
+            ScenarioType::ClusterRollingRestartFullCluster,
+        ];
+
+        for scenario in cluster_scenarios {
+            let config = ScenarioConfig::new(scenario, 12345);
+            assert_eq!(config.scenario_type, scenario);
+            assert!(
+                !scenario.is_aspirational(),
+                "{scenario:?} still tagged aspirational after T2.3 driver pass",
+            );
+            assert!(ScenarioType::all().contains(&scenario));
+            assert!(!scenario.name().is_empty());
+            assert!(!scenario.description().is_empty());
+            // Every cluster scenario stresses replica availability —
+            // gray-failure injection is the in-process VOPR equivalent
+            // of OS-process crashes / hangs / restarts.
+            assert!(
+                config.gray_failure_injector.is_some(),
+                "{scenario:?} driver did not enable gray-failure injection",
+            );
+            // Non-baseline event budget — cluster scenarios need
+            // headroom to span multiple supervisor restart windows.
+            assert!(
+                config.max_events > 15_000,
+                "{scenario:?} max_events {} is too low for cluster cadence",
+                config.max_events,
+            );
+        }
+    }
+
+    /// v0.9.x T2.3 — verifies the cascading-failure driver carries the
+    /// aggressive-cascade shape (high gray-failure entry, low recovery,
+    /// elevated network drop) the canary contract calls out.
+    #[test]
+    fn test_cluster_cascading_node_failure_shape() {
+        let config = ScenarioConfig::new(ScenarioType::ClusterCascadingNodeFailure, 12345);
+        assert!(config.swizzle_clogger.is_some());
+        assert!(config.gray_failure_injector.is_some());
+        assert!(config.network_config.drop_probability >= 0.10);
+        // 30s+ runtime to span the cascade + recovery window.
+        assert!(config.max_time_ns >= 25_000_000_000);
+    }
+
+    /// v0.9.x T2.3 — verifies the health-check-timeout driver carries
+    /// the "respond-but-late + near-zero recovery" gray-failure shape
+    /// (the classic hung-process pattern).
+    #[test]
+    fn test_cluster_health_check_timeout_shape() {
+        let config = ScenarioConfig::new(ScenarioType::ClusterHealthCheckTimeout, 12345);
+        // Elevated latency models the hang showing up as slow responses.
+        assert!(config.network_config.max_delay_ns >= 50_000_000);
+        assert!(config.gray_failure_injector.is_some());
+    }
+
+    /// v0.9.x T2.3 — verifies the rolling-restart driver carries the
+    /// sustained-cycling shape (matched gray-failure entry/recovery
+    /// rates over a long simulated window).
+    #[test]
+    fn test_cluster_rolling_restart_shape() {
+        let config = ScenarioConfig::new(ScenarioType::ClusterRollingRestartFullCluster, 12345);
+        assert!(config.gray_failure_injector.is_some());
+        // Long-enough window to span N restart cycles.
+        assert!(config.max_time_ns >= 30_000_000_000);
+        // High event count — restarts overlap with sustained writes.
+        assert!(config.max_events >= 25_000);
     }
 
     #[test]

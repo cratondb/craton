@@ -2639,6 +2639,24 @@ fn parse_scenario(name: &str) -> Option<ScenarioType> {
         "alter_table_crash_recovery" | "alter-table-crash-recovery" => {
             Some(ScenarioType::AlterTableCrashRecovery)
         }
+        // v0.9.x T2.3 — cluster supervisor scenarios. Snake_case
+        // canonical + kebab-case alias, consistent with the rest of
+        // this matcher.
+        "cluster_node_process_crash" | "cluster-node-process-crash" => {
+            Some(ScenarioType::ClusterNodeProcessCrash)
+        }
+        "cluster_cascading_node_failure" | "cluster-cascading-node-failure" => {
+            Some(ScenarioType::ClusterCascadingNodeFailure)
+        }
+        "cluster_health_check_timeout" | "cluster-health-check-timeout" => {
+            Some(ScenarioType::ClusterHealthCheckTimeout)
+        }
+        "cluster_config_reload_under_load" | "cluster-config-reload-under-load" => {
+            Some(ScenarioType::ClusterConfigReloadUnderLoad)
+        }
+        "cluster_rolling_restart_full_cluster" | "cluster-rolling-restart-full-cluster" => {
+            Some(ScenarioType::ClusterRollingRestartFullCluster)
+        }
         _ => None,
     }
 }

@@ -409,6 +409,37 @@ Items we're not working on now. Revisit at v0.8+ or v1.0 planning.
   integration spanning blob lifecycle) requires kernel-level blob
   primitives. A backend-adapter trait alone (S3 / GCS / Azure /
   MinIO) is a community-extension shape, not a core primitive.
+- **Cluster T4 nice-to-haves (post-v0.9.x graduation).** Captured
+  here so the v0.9.x cluster-graduation design doc can be archived
+  cleanly once T1–T3 close. Each is a discrete v1.0+ work item with
+  its own dependencies:
+  - **Multi-region topology** — cross-AZ replication latency
+    simulation in VOPR + transport-layer accommodations for
+    higher-latency links. Today's `MultiNodeReplicator` assumes
+    same-AZ latencies; cross-AZ pushes view-change timeouts and
+    quorum-write tail-latency budgets in ways that need a design
+    pass before code. Dependency: real customer requirement
+    (federated hospital network, multi-region payer).
+  - **Hot-standby read replicas surfaced through the SDK with
+    read-your-writes semantics** — extends the existing standby
+    work (`StandbyFollowsLog` / `StandbyPromotion` / `StandbyReadScaling`
+    VOPR scenarios) to a first-class SDK surface: client opts into
+    read-from-replica, the SDK injects causality tokens so a
+    follow-up read sees its own write. Dependency: protocol-version
+    bump for the causality token, SDK API design for opt-in.
+  - **Web admin UI for cluster topology + per-node health.** Folds
+    into the existing `kimberlite-studio` surface — adds a topology
+    view that consumes the T1.2 `/healthz` + `/readyz` + `/metrics`
+    endpoints + a per-node panel. Dependency: `kimberlite-studio`
+    reaching v1 itself (currently scoped for v0.10.x).
+  - **Backup encryption tied to the customer-managed key story
+    (BYOK).** Today's T2.2 backup archives are zstd-compressed but
+    not encrypted at rest. Production deployments either accept
+    encryption-at-the-storage-layer (S3 SSE) or want a customer-
+    managed key directly bound to the archive. Dependency: the
+    BYOK / external-KMS Q3 deliverable (`ROADMAP.md` v0.10.x
+    section); design wraps the archive in an AES-256-GCM envelope
+    keyed by the customer's KMS.
 - **Document content search / full-text index** — `LIKE` / `ILIKE`
   in `crates/kimberlite-query/src/plan.rs::matches_like_pattern`
   cover pattern matching; there is no tokenizer, inverted index,

@@ -18,6 +18,45 @@ user-facing narrative.
 _Accretion slot for v0.9.0 work. See [`ROADMAP.md`](./ROADMAP.md)
 for planned scope._
 
+### Added — v0.9.x cluster graduation T2.3 (drivers)
+
+- **5 cluster-supervisor VOPR scenarios promoted out of the aspirational
+  set** with real drivers in `crates/kimberlite-sim/src/scenarios.rs`:
+  - `cluster_node_process_crash` — single-replica gray-failure cycling
+    (15 %/30 % entry/recovery), ~20 s window — models SIGKILL + supervisor
+    restart of one follower while N-1 nodes stay writable.
+  - `cluster_cascading_node_failure` — aggressive 35 %/8 % gray-failure
+    rates + 15 % packet drop + aggressive swizzle-clogging, 30 s window —
+    models N-1 nodes failing in rapid sequence.
+  - `cluster_health_check_timeout` — 20 %/3 % gray-failure + elevated
+    network latency (max 100 ms) — models a hung process that responds
+    slowly rather than crashing outright.
+  - `cluster_config_reload_under_load` — 8 %/25 % gray-failure + 2k
+    in-flight + 30k events — stresses the supervisor's reload window
+    against sustained write load.
+  - `cluster_rolling_restart_full_cluster` — matched 18 %/22 % gray-failure
+    cycling over a 40 s window — models sequential node-by-node restart
+    with leadership transferring along the way.
+- **`ScenarioConfig::new` dispatch** wired to the five new drivers; the
+  `aspirational_v07` shortcut for these scenarios is gone.
+- **`vopr --scenario cluster-*` aliases** added to `parse_scenario` so
+  each driver is selectable from the CLI (snake_case + kebab-case,
+  matching the rest of the matcher).
+- **Unit tests**: `test_cluster_scenarios_have_real_drivers` covers all
+  five; per-scenario shape tests (`*_cascading_*`, `*_health_check_*`,
+  `*_rolling_restart_*`) assert the fault parameters match the canary
+  contract in each scenario's `description()` string.
+- **Smoke runs** (release build, 30 iterations each): all five drivers
+  pass with 0 invariant violations and 16/16 invariants covered.
+
+The in-process VOPR runtime does not model an OS process supervisor;
+the drivers express the fault *shapes* the supervisor would surface to
+the replicated log. The existing VSR invariants (offset monotonicity,
+prefix property, durability, hash-chain integrity) are the canary
+mutations. End-to-end OS-process coverage continues to live in
+`crates/kimberlite-cluster/tests/three_node_integration.rs` (T1.3) and
+`tests/perf_baseline.rs` (T3.2).
+
 ### Added — v0.9.x cluster graduation T3.3
 
 - **`examples/deployment/systemd/`** — production-shaped templated

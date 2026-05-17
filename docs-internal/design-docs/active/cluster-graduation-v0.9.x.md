@@ -131,20 +131,26 @@ HIPAA § 164.308(a)(7) — contingency plan requires data backup, disaster recov
 - **Scope deviation from doc wording**: the design said "JOIN-into-checkpoint" — VSR-coordinated pause for a quiescent snapshot. The shipped path is offline-safe: operator either stops writes for a clean snapshot or accepts the trailing-fsync-window semantic. Online-coordinated backup is documented in the runbook as a v1.0 deliverable.
 - **Estimate**: 1.5 weeks
 
-### T2.3 — Cluster-level VOPR scenarios — **SCAFFOLDING DONE** (4a7237e); drivers are follow-on
+### T2.3 — Cluster-level VOPR scenarios — **DONE** (4a7237e scaffolding; drivers in this slice)
 
 Today's VOPR scenarios target VSR (consensus) and the kernel directly. The supervisor itself — process restart, health-check timing, config reload, cascading node failure — has zero VOPR coverage.
 
 - **File**: `crates/kimberlite-sim/src/scenarios.rs`
-- **Scaffolded variants** (registered through `ScenarioType::all()`, `is_aspirational()`, `description()` and dispatched to `aspirational_v07` baseline like the Q2 clinical sibling family — drivers ship per-scenario in subsequent commits):
-  - `ClusterNodeProcessCrash` — SIGKILL one node, supervisor restarts within `restart_window_ms`, restart count audited
-  - `ClusterCascadingNodeFailure` — N-1 nodes crash in sequence (where N is quorum size); cluster blocks writes but never loses committed entries
-  - `ClusterHealthCheckTimeout` — node hangs without crashing; `/readyz` flips red within bounded time; supervisor escalates to restart
-  - `ClusterConfigReloadUnderLoad` — `cluster.toml` updated mid-write; no in-flight write loses durability
-  - `ClusterRollingRestartFullCluster` — each node restarted in sequence; the leader transition window doesn't drop committed entries
-- **Acceptance**: 5 scenarios added to `ScenarioType::all()`, `is_aspirational()`, and `description()` arms with canary-mutation contracts (same pattern as Q2's clinical scenarios). Drivers ship per-scenario in follow-ons.
-- **What shipped**: all 5 variants registered with the canary contracts above; matrix gate ("5 cluster scenarios in `ScenarioType::all()` with canary contracts") is met. Drivers remain follow-on work alongside the parallel Q2 clinical scenario family (which uses the same scaffolding-only convention).
-- **Estimate**: 3 days for scaffolding (done); per-driver follow-ons are separately tracked.
+- **Scenarios** (registered through `ScenarioType::all()`, `description()`, and the `ScenarioConfig::new` dispatch — each backed by a real driver method, no longer flagged `is_aspirational`):
+  - `ClusterNodeProcessCrash` — SIGKILL one node, supervisor restarts within `restart_window_ms`, restart count audited. Driver: `cluster_node_process_crash()` — single-replica gray-failure cycling at 15 %/30 % entry/recovery, ~20 s window.
+  - `ClusterCascadingNodeFailure` — N-1 nodes crash in sequence (where N is quorum size); cluster blocks writes but never loses committed entries. Driver: `cluster_cascading_node_failure()` — aggressive 35 %/8 % gray-failure rates + 15 % network drop + aggressive swizzle-clogging, 30 s window.
+  - `ClusterHealthCheckTimeout` — node hangs without crashing; `/readyz` flips red within bounded time; supervisor escalates to restart. Driver: `cluster_health_check_timeout()` — 20 %/3 % gray-failure + elevated latency (max 100 ms) modelling slow-not-absent responses.
+  - `ClusterConfigReloadUnderLoad` — `cluster.toml` updated mid-write; no in-flight write loses durability. Driver: `cluster_config_reload_under_load()` — 8 %/25 % gray-failure + 2k in-flight + 30k events stressing the reload window.
+  - `ClusterRollingRestartFullCluster` — each node restarted in sequence; the leader transition window doesn't drop committed entries. Driver: `cluster_rolling_restart_full_cluster()` — matched 18 %/22 % gray-failure cycling over a 40 s window.
+- **Acceptance**: 5 scenarios in `ScenarioType::all()` with canary contracts in `description()`, dispatched to real drivers (not `aspirational_v07`), parseable via `vopr --scenario cluster-*`, executed by `cargo run -p kimberlite-sim --bin vopr -- --scenario <name>`.
+- **What shipped**:
+  - 5 driver methods in `scenarios.rs::impl ScenarioConfig`.
+  - `ScenarioConfig::new` dispatch updated; `is_aspirational()` no longer claims them; `description()` strings drop the "(Q2 cluster scaffold)" tag in favour of "(v0.9.x cluster scenario)".
+  - 4 new unit tests in `scenarios::tests`: `test_cluster_scenarios_have_real_drivers` covers all 5; per-scenario shape tests for cascading/health-check/rolling-restart.
+  - `vopr::parse_scenario` matcher gains `cluster-*` aliases (snake_case + kebab-case, consistent with the rest of the table).
+  - Smoke runs: each scenario passes 30+ iterations with 0 invariant violations and 16/16 invariants covered.
+- **In-process VOPR vs OS supervisor caveat**: the in-process VOPR runtime does not model an OS-level process supervisor; the drivers express the fault *shapes* the real `kimberlite-cluster` supervisor would surface to the replicated log (one or more replicas going dark, hanging, or being restarted in sequence). The existing VSR invariants (offset monotonicity, prefix property, durability, hash-chain integrity) are the canary mutations — any safety regression would land there. End-to-end OS-process supervisor coverage continues to live in `crates/kimberlite-cluster/tests/three_node_integration.rs` (T1.3) and `tests/perf_baseline.rs` (T3.2).
+- **Estimate**: 3 days scaffolding + 1 day drivers (both done).
 
 ## T3 — Important (must be planned, may slip to v1.0)
 
@@ -189,29 +195,30 @@ Today's VOPR scenarios target VSR (consensus) and the kernel directly. The super
 
 **Estimate**: 2 days (done).
 
-## T4 — Nice-to-have (v1.0+)
+## T4 — Nice-to-have (v1.0+) — **captured in `ROADMAP.md` deferred section**
 
-- Multi-region topology (cross-AZ replication latency simulation)
-- Hot-standby read replicas surfaced through the SDK with read-your-writes semantics
-- Web admin UI showing cluster topology + per-node health (folds into existing `kimberlite-studio`)
-- Backup encryption tied to the customer-managed key story (`kimberlite-crypto` BYOK from the Q3 plan)
+Each of these is a discrete v1.0+ work item with its own dependencies; all four are now tracked under the "Cluster T4 nice-to-haves (post-v0.9.x graduation)" bullet in `ROADMAP.md`'s Deferred section. Original list, kept here for design-doc completeness:
+
+- Multi-region topology (cross-AZ replication latency simulation). Dependency: real customer requirement (federated hospital network, multi-region payer).
+- Hot-standby read replicas surfaced through the SDK with read-your-writes semantics. Dependency: protocol-version bump for the causality token, SDK API design.
+- Web admin UI showing cluster topology + per-node health (folds into existing `kimberlite-studio`). Dependency: `kimberlite-studio` reaching v1 (currently v0.10.x scoped).
+- Backup encryption tied to the customer-managed key story (`kimberlite-crypto` BYOK from the Q3 plan). Dependency: BYOK / external-KMS Q3 deliverable; design wraps the archive in an AES-256-GCM envelope keyed by the customer's KMS.
 
 ## Verification matrix
 
-End-state acceptance for graduating the crate from `Cargo.toml`'s "not ready for public use" description:
+End-state acceptance for graduating the crate from `Cargo.toml`'s "not ready for public use" description. **All gates closed as of 2026-05-17**; `(not ready for public use)` removed from the crate description in `19e1e5e`.
 
-| Gate | Evidence |
-|---|---|
-| T1.1 real subprocess | 3-node smoke test green in CI |
-| T1.2 health endpoints | curl-able from each node; Prometheus scrape returns 4+ gauges |
-| T1.3 integration tests | 5 scenarios green; SIGKILL-leader scenario reliably elects new leader |
-| T2.1 multi-host | `cluster.toml` with 3 distinct IPs boots end-to-end |
-| T2.2 backup/restore | 1 GB roundtrip identical row-by-row |
-| T2.3 VOPR coverage | 5 cluster scenarios in `ScenarioType::all()` with canary contracts |
-| T3.1 runbook | published under `docs/operating/runbooks/` |
-| T3.2 perf baseline | RTO + RPO numbers in release notes |
-
-When T1.* and T2.* are complete, drop the `(not ready for public use)` from the crate's `Cargo.toml` description.
+| Gate | Evidence | Landed |
+|---|---|---|
+| T1.1 real subprocess | 3-node smoke test green in CI | `f1fd8df` |
+| T1.2 health endpoints | curl-able from each node; Prometheus scrape returns 4+ gauges | `780d695` |
+| T1.3 integration tests | 5 scenarios green; SIGKILL-leader scenario reliably elects new leader | `fd8ce37` + 4 follow-on fixes (`f9695a4`, `9f642d7`, `1971aa7`, `b488398`, `b04439f`, `23537cb`) |
+| T2.1 multi-host | `cluster.toml` with 3 distinct IPs boots end-to-end | `8df6dc9` |
+| T2.2 backup/restore | 1 GB roundtrip identical row-by-row | `5d337ee` |
+| T2.3 VOPR coverage | 5 cluster scenarios in `ScenarioType::all()` with canary contracts, dispatched to real drivers | `4a7237e` (scaffolding) + this slice (drivers) |
+| T3.1 runbook | published under `docs/operating/runbooks/` | `b4b0696`, `53e504b` |
+| T3.2 perf baseline | RTO + RPO numbers in release notes | `bb5082b` |
+| T3.3 daemonization | systemd + docker-compose under `examples/deployment/` | `2993ff6` |
 
 ## Estimate summary
 
@@ -230,6 +237,8 @@ This is consistent with the original plan's framing of Q2 (3 months) covering HL
 - General-purpose distributed-systems primitives (gossip, sharding, etc.). Kimberlite is single-master VSR; cross-shard transactions are explicitly not in the roadmap.
 - BYOK / external-KMS integration. That's a Q3 deliverable (see `ROADMAP.md`'s v0.10.x section).
 
-## First piece (today)
+## Status — graduated
 
-Of all the work above, the smallest concrete addition that ships without prerequisites is **T2.3 (cluster VOPR scenarios)** — same scaffolding pattern as the Q2 clinical scenarios, additive, no kernel changes. Recommended as the immediate next commit; the heavier T1.* integration work follows in subsequent sessions.
+All T1, T2, T3 items closed. `kimberlite-cluster` graduated v0.9.x. T4 items captured in `ROADMAP.md`'s Deferred section as discrete v1.0+ work items, each with stated dependencies.
+
+This design doc should be moved from `docs-internal/design-docs/active/` to `docs-internal/design-docs/archived/` once the next release cuts.
