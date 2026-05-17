@@ -39,7 +39,7 @@ use tracing::{debug, info, trace, warn};
 
 use crate::VsrError;
 use crate::config::{ClusterConfig, TimeoutConfig};
-use crate::message::MessagePayload;
+use crate::message::{Message, MessagePayload};
 use crate::replica::{ReplicaEvent, ReplicaOutput, ReplicaState, TimeoutKind};
 use crate::superblock::Superblock;
 use crate::tcp_transport::TcpTransport;
@@ -734,18 +734,34 @@ impl<S: Read + Write + Seek> EventLoop<S> {
             .into_iter()
             .partition(|m| matches!(m.payload, MessagePayload::PrepareOk(_)));
 
+        let local_id = self.replica_state.replica_id();
+        // Self-addressed messages collected here for replay below.
+        // `TcpTransport::send(local_id, _)` is a silent no-op (the
+        // peers map excludes self), so without re-injection a directed
+        // message to ourselves vanishes. The motivating case is the
+        // new leader's own `DoViewChange`: after a heartbeat timeout
+        // a 3-node cluster only reaches view-change quorum if the
+        // new leader's own DVC is in its `do_view_change_msgs`
+        // tracker. Drop-on-self left the new leader stuck at
+        // quorum-1 forever and the cluster wedged in `ViewChange`.
+        let mut self_routed: Vec<Message> = Vec::new();
+
         // Send all non-PrepareOk messages immediately (heartbeats, commits, etc.)
         for msg in immediate {
             if msg.is_broadcast() {
                 let others: Vec<_> = self
                     .cluster_config
-                    .others(self.replica_state.replica_id())
+                    .others(local_id)
                     .collect();
                 for peer in others {
                     self.transport.send(peer, msg.clone());
                 }
             } else if let Some(to) = msg.to {
-                self.transport.send(to, msg);
+                if to == local_id {
+                    self_routed.push(msg);
+                } else {
+                    self.transport.send(to, msg);
+                }
             }
         }
 
@@ -761,7 +777,11 @@ impl<S: Read + Write + Seek> EventLoop<S> {
 
             for msg in prepare_oks {
                 if let Some(to) = msg.to {
-                    self.transport.send(to, msg);
+                    if to == local_id {
+                        self_routed.push(msg);
+                    } else {
+                        self.transport.send(to, msg);
+                    }
                 }
             }
         }
@@ -825,6 +845,21 @@ impl<S: Read + Write + Seek> EventLoop<S> {
 
             // Cancel prepare timeout
             self.timeouts.cancel_prepare(op);
+        }
+
+        // Replay any messages addressed back at ourselves through the
+        // normal `process_event` path. The state machine handles them
+        // exactly as it would an inbound message from the wire — which
+        // is the only way the new leader's own `DoViewChange` can land
+        // in its `do_view_change_msgs` tracker and complete the view
+        // change. Each replay can produce further output (e.g. the
+        // `StartView` broadcast after quorum), which goes through the
+        // same `handle_output` (now via the recursive call). Terminates
+        // because each replay strictly advances `replica_state` toward
+        // a steady state — there is no cycle of self-routing messages
+        // in the protocol.
+        for msg in self_routed {
+            self.process_event(ReplicaEvent::Message(Box::new(msg)))?;
         }
 
         Ok(())
