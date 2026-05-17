@@ -29,8 +29,20 @@ pub enum ReplicationMode {
     Cluster {
         /// This node's replica ID.
         replica_id: ReplicaId,
-        /// Peer addresses for all replicas (including self).
+        /// VSR transport peer addresses for all replicas (including
+        /// self). These are the addresses the consensus layer dials
+        /// for `Prepare` / `Commit` / `DoViewChange`. On the
+        /// supervisor-spawned topology they sit at
+        /// `data_port + VSR_PORT_OFFSET`.
         peers: Vec<(ReplicaId, SocketAddr)>,
+        /// Client-facing data peer addresses for all replicas
+        /// (including self). Used to populate the `leader_hint`
+        /// returned with `NotLeader` so SDK retry-on-hint redirects
+        /// land on the leader's data port, not its VSR port. Defaults
+        /// to a clone of `peers` for constructors that don't know the
+        /// distinction (single-host dev / tests where data and VSR
+        /// ports happen to coincide).
+        client_peers: Vec<(ReplicaId, SocketAddr)>,
     },
 }
 
@@ -94,18 +106,50 @@ impl ReplicationMode {
 
         Self::Cluster {
             replica_id: ReplicaId::new(replica_id),
+            client_peers: peers.clone(),
             peers,
         }
     }
 
     /// Creates a cluster configuration from a list of peer addresses.
     ///
+    /// `peers` doubles as both the VSR transport list and the
+    /// client-facing peer list, which is only valid when the two
+    /// happen to coincide (single-binding dev clusters, tests). For
+    /// the supervisor-spawned production topology, prefer
+    /// [`Self::cluster_with_client_peers`].
+    ///
     /// # Arguments
     ///
     /// * `replica_id` - This node's replica ID
     /// * `peers` - List of (`ReplicaId`, `SocketAddr`) for all cluster members
     pub fn cluster(replica_id: ReplicaId, peers: Vec<(ReplicaId, SocketAddr)>) -> Self {
-        Self::Cluster { replica_id, peers }
+        Self::Cluster {
+            replica_id,
+            client_peers: peers.clone(),
+            peers,
+        }
+    }
+
+    /// Creates a cluster configuration with distinct VSR and
+    /// client-facing peer maps.
+    ///
+    /// The supervisor spawns each node with VSR bound at
+    /// `data_port + VSR_PORT_OFFSET`; `peers` covers the VSR
+    /// transport while `client_peers` covers the client data ports.
+    /// The two maps MUST agree on replica ids — callers that mismatch
+    /// here will surface a wrong `leader_hint` on `NotLeader`, which
+    /// is exactly the bug this constructor exists to avoid.
+    pub fn cluster_with_client_peers(
+        replica_id: ReplicaId,
+        peers: Vec<(ReplicaId, SocketAddr)>,
+        client_peers: Vec<(ReplicaId, SocketAddr)>,
+    ) -> Self {
+        Self::Cluster {
+            replica_id,
+            peers,
+            client_peers,
+        }
     }
 
     /// Creates a cluster configuration from a comma-separated peer string.
@@ -161,6 +205,7 @@ impl ReplicationMode {
 
         Ok(Self::Cluster {
             replica_id: replica,
+            client_peers: peers.clone(),
             peers,
         })
     }
@@ -222,13 +267,20 @@ impl ReplicationMode {
     ///
     /// Reads the following environment variables:
     /// - `KMB_REPLICA_ID`: This node's replica ID (required for cluster mode)
-    /// - `KMB_CLUSTER_PEERS`: Comma-separated peer addresses
+    /// - `KMB_CLUSTER_PEERS`: Comma-separated VSR transport peer addresses
+    /// - `KMB_CLUSTER_CLIENT_PEERS`: Optional, comma-separated
+    ///   client-facing data peer addresses. When unset, falls back to
+    ///   `KMB_CLUSTER_PEERS` — which yields the wrong `leader_hint`
+    ///   port for SDK retry redirects in supervisor-spawned topologies
+    ///   (data port + `VSR_PORT_OFFSET`); the supervisor sets this
+    ///   variable to keep the hints client-addressable.
     ///
     /// # Example
     ///
     /// ```bash
     /// export KMB_REPLICA_ID=0
-    /// export KMB_CLUSTER_PEERS="0=127.0.0.1:5000,1=127.0.0.1:5001,2=127.0.0.1:5002"
+    /// export KMB_CLUSTER_PEERS="0=127.0.0.1:5100,1=127.0.0.1:5101,2=127.0.0.1:5102"
+    /// export KMB_CLUSTER_CLIENT_PEERS="0=127.0.0.1:5000,1=127.0.0.1:5001,2=127.0.0.1:5002"
     /// ```
     pub fn from_env() -> Result<Self, ClusterConfigError> {
         // Check for single-node mode
@@ -256,7 +308,36 @@ impl ReplicationMode {
                 reason: "must be a number 0-255".to_string(),
             })?;
 
-        Self::cluster_from_str(replica_id, &peers_str)
+        let mut mode = Self::cluster_from_str(replica_id, &peers_str)?;
+
+        // Optional override for the client-facing peer map. When the
+        // supervisor sets `KMB_CLUSTER_CLIENT_PEERS`, the parsed map
+        // wholesale replaces the `client_peers` cluster_from_str
+        // defaulted from `peers`. Validated against the same shape
+        // contract as `peers` (≥3 nodes, odd, replica_id present, no
+        // duplicates) so a malformed env var fails-fast at boot rather
+        // than at the first `NotLeader` response.
+        if let Ok(client_str) = std::env::var("KMB_CLUSTER_CLIENT_PEERS") {
+            let parsed = Self::parse_peers(&client_str)?;
+            if parsed.len() < 3 {
+                return Err(ClusterConfigError::TooFewNodes {
+                    count: parsed.len(),
+                    minimum: 3,
+                });
+            }
+            if parsed.len() % 2 == 0 {
+                return Err(ClusterConfigError::EvenNodeCount { count: parsed.len() });
+            }
+            let replica = ReplicaId::new(replica_id);
+            if !parsed.iter().any(|(id, _)| *id == replica) {
+                return Err(ClusterConfigError::ReplicaNotInCluster { replica_id });
+            }
+            if let Self::Cluster { client_peers, .. } = &mut mode {
+                *client_peers = parsed;
+            }
+        }
+
+        Ok(mode)
     }
 
     /// Returns the replica ID if replication is enabled.
@@ -267,10 +348,22 @@ impl ReplicationMode {
         }
     }
 
-    /// Returns the peer addresses if in cluster mode.
+    /// Returns the VSR-transport peer addresses if in cluster mode.
     pub fn peers(&self) -> Option<&[(ReplicaId, SocketAddr)]> {
         match self {
             Self::Cluster { peers, .. } => Some(peers),
+            _ => None,
+        }
+    }
+
+    /// Returns the client-facing peer addresses if in cluster mode.
+    ///
+    /// These drive the `leader_hint` field of `NotLeader` responses
+    /// so SDK retry-on-hint redirects land on the leader's data port
+    /// rather than its VSR transport port.
+    pub fn client_peers(&self) -> Option<&[(ReplicaId, SocketAddr)]> {
+        match self {
+            Self::Cluster { client_peers, .. } => Some(client_peers),
             _ => None,
         }
     }
@@ -432,6 +525,55 @@ mod tests {
             err,
             ClusterConfigError::DuplicateReplicaId { replica_id: 0 }
         ));
+    }
+
+    #[test]
+    fn cluster_from_str_defaults_client_peers_to_peers() {
+        // Without `cluster_with_client_peers` (or the env-var path
+        // in `from_env`), client_peers should mirror peers — that's
+        // the pre-graduation behaviour and the safe default for
+        // tests / single-host dev clusters.
+        let mode = ReplicationMode::cluster_from_str(
+            0,
+            "0=127.0.0.1:5100,1=127.0.0.1:5101,2=127.0.0.1:5102",
+        )
+        .unwrap();
+
+        let peers = mode.peers().unwrap();
+        let client_peers = mode.client_peers().unwrap();
+        assert_eq!(peers, client_peers);
+    }
+
+    #[test]
+    fn cluster_with_client_peers_keeps_distinct_maps() {
+        // The supervisor-spawned topology binds VSR at
+        // data_port + VSR_PORT_OFFSET. Verify the constructor
+        // preserves both addresses independently.
+        let vsr: Vec<(ReplicaId, SocketAddr)> = (0..3)
+            .map(|i| {
+                (
+                    ReplicaId::new(i),
+                    format!("127.0.0.1:{}", 5100 + u16::from(i)).parse().unwrap(),
+                )
+            })
+            .collect();
+        let data: Vec<(ReplicaId, SocketAddr)> = (0..3)
+            .map(|i| {
+                (
+                    ReplicaId::new(i),
+                    format!("127.0.0.1:{}", 5000 + u16::from(i)).parse().unwrap(),
+                )
+            })
+            .collect();
+
+        let mode = ReplicationMode::cluster_with_client_peers(
+            ReplicaId::new(1),
+            vsr.clone(),
+            data.clone(),
+        );
+
+        assert_eq!(mode.peers().unwrap(), vsr.as_slice());
+        assert_eq!(mode.client_peers().unwrap(), data.as_slice());
     }
 
     #[test]

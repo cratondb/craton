@@ -89,9 +89,16 @@ impl NodeProcess {
             .arg(self.config.data_dir.as_os_str())
             .arg("--address")
             .arg(&address)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stdin(Stdio::null());
+        // Stdout/stderr inheritance is gated by KMB_CLUSTER_INHERIT_STDIO=1 —
+        // off by default (the supervisor's job is to keep child noise out of
+        // its own output stream), on when an operator or integration test
+        // needs to see VSR / server logs while debugging a flake.
+        if std::env::var_os("KMB_CLUSTER_INHERIT_STDIO").is_some() {
+            command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+        } else {
+            command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        }
 
         if !self.config.peers.is_empty() {
             command.arg("--cluster");
@@ -101,8 +108,19 @@ impl NodeProcess {
                 self.config.port,
                 &self.config.peers,
             );
+            // Parallel data-port map. The server uses this to populate
+            // the `leader_hint` on `NotLeader` responses so SDK clients
+            // redirect to the leader's data port rather than its VSR
+            // transport port (data + `VSR_PORT_OFFSET`).
+            let client_peers_env = render_cluster_client_peers_env(
+                self.config.id,
+                &self.config.bind_address,
+                self.config.port,
+                &self.config.peers,
+            );
             command.env("KMB_REPLICA_ID", self.config.id.to_string());
             command.env("KMB_CLUSTER_PEERS", peers_env);
+            command.env("KMB_CLUSTER_CLIENT_PEERS", client_peers_env);
             // Bind the HTTP sidecar at `data_port + HTTP_PORT_OFFSET` so
             // probes are reachable per node without colliding with peer
             // data ports.
@@ -344,6 +362,37 @@ fn render_cluster_peers_env(
     entries.join(",")
 }
 
+/// Renders the `KMB_CLUSTER_CLIENT_PEERS` env value
+/// (`0=host:data_port,1=host:data_port,...`).
+///
+/// Same shape as [`render_cluster_peers_env`] but keeps the data port
+/// (no VSR offset) so the server can populate `NotLeader::leader_hint`
+/// with a client-facing address. `peers` already lists data ports, so
+/// we just reinsert self at the right position and pass the values
+/// through unchanged.
+fn render_cluster_client_peers_env(
+    self_id: usize,
+    self_addr: &str,
+    self_port: u16,
+    peers: &[String],
+) -> String {
+    let total = peers.len() + 1;
+    let mut entries: Vec<String> = Vec::with_capacity(total);
+    let mut peer_iter = peers.iter();
+    for id in 0..total {
+        let entry = if id == self_id {
+            format!("{id}={self_addr}:{self_port}")
+        } else {
+            let raw = peer_iter
+                .next()
+                .expect("peer list inconsistent with self_id: peers should equal node_count - 1");
+            format!("{id}={raw}")
+        };
+        entries.push(entry);
+    }
+    entries.join(",")
+}
+
 /// Adds `offset` to the port suffix of a `host:port` peer string. Falls
 /// back to the original string if the port doesn't parse — the spawned
 /// child will surface a clearer error than this helper would.
@@ -441,6 +490,33 @@ mod tests {
         let env =
             render_cluster_peers_env(0, "127.0.0.1", 5432, &["127.0.0.1:5433".to_string()]);
         assert_eq!(env, "0=127.0.0.1:5532,1=127.0.0.1:5533");
+    }
+
+    #[test]
+    fn render_cluster_client_peers_env_keeps_data_ports() {
+        // The client-peer env must NOT apply the VSR offset — the
+        // server uses this map to populate the leader_hint that SDK
+        // clients dial directly, so it has to be a data port.
+        let env = render_cluster_client_peers_env(
+            1,
+            "127.0.0.1",
+            5433,
+            &[
+                "127.0.0.1:5432".to_string(),
+                "127.0.0.1:5434".to_string(),
+            ],
+        );
+        assert_eq!(
+            env,
+            "0=127.0.0.1:5432,1=127.0.0.1:5433,2=127.0.0.1:5434"
+        );
+    }
+
+    #[test]
+    fn render_cluster_client_peers_env_handles_node_zero() {
+        let env =
+            render_cluster_client_peers_env(0, "127.0.0.1", 5432, &["127.0.0.1:5433".to_string()]);
+        assert_eq!(env, "0=127.0.0.1:5432,1=127.0.0.1:5433");
     }
 
     #[test]

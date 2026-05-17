@@ -339,6 +339,17 @@ impl MultiNodeReplicator {
         self.handle.state().status
     }
 
+    /// Returns a single atomic snapshot of the shared state (view,
+    /// commit, status, is_leader, leader_id, bootstrap flag, connected
+    /// peers). Use this when reporting / metrics need a self-consistent
+    /// tuple — calling `is_leader()` + `view()` separately walks two
+    /// distinct lock acquisitions and can observe partially-updated
+    /// state across a `update_shared_state` boundary, which led to
+    /// `is_leader=1 / view=0` mismatches on followers during boot.
+    pub fn shared_state(&self) -> crate::event_loop::SharedState {
+        self.handle.state()
+    }
+
     /// Returns the cluster addresses.
     pub fn addresses(&self) -> &ClusterAddresses {
         &self.addresses

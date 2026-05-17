@@ -9,7 +9,9 @@
 //! - **`SingleNode`**: Single-node VSR with file-based superblock (durable, for development)
 //! - **Cluster**: Multi-node VSR with full consensus (production-grade)
 
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
+use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::thread;
@@ -20,7 +22,7 @@ use kimberlite_kernel::{Command, State as KernelState};
 use kimberlite_types::IdempotencyId;
 use kimberlite_vsr::{
     AppliedCommand, AppliedCommit, ClusterAddresses, ClusterConfig, MultiNodeConfig,
-    MultiNodeReplicator, Replicator, SingleNodeReplicator, VsrError,
+    MultiNodeReplicator, ReplicaId, Replicator, SingleNodeReplicator, VsrError,
 };
 use tracing::{debug, info, warn};
 
@@ -62,6 +64,17 @@ pub enum CommandSubmitter {
         /// boot — initial lag is "time since process start" which is
         /// fine; operators care about the steady-state delta.
         last_commit_advance: Arc<Mutex<Instant>>,
+        /// Client-facing peer addresses, indexed by replica id. Used
+        /// to populate the `leader_hint` returned with `NotLeader`
+        /// responses so SDK retry-on-hint redirects land on the
+        /// leader's data port rather than its VSR transport port
+        /// (`MultiNodeReplicator::leader_address()` returns the
+        /// latter). Empty when `ReplicationMode::Cluster::client_peers`
+        /// happens to coincide with `peers` — the fallback resolver
+        /// then returns the VSR address (which is wrong, but matches
+        /// pre-graduation behaviour for callers that didn't supply a
+        /// distinct client map).
+        client_peers: HashMap<ReplicaId, SocketAddr>,
     },
 }
 
@@ -109,7 +122,11 @@ impl CommandSubmitter {
                 })
             }
 
-            ReplicationMode::Cluster { replica_id, peers } => {
+            ReplicationMode::Cluster {
+                replica_id,
+                peers,
+                client_peers,
+            } => {
                 info!(
                     replica_id = replica_id.as_u8(),
                     peer_count = peers.len(),
@@ -118,6 +135,8 @@ impl CommandSubmitter {
 
                 // Build cluster addresses
                 let addresses = ClusterAddresses::from_pairs(peers.iter().copied());
+                let client_peers_map: HashMap<ReplicaId, SocketAddr> =
+                    client_peers.iter().copied().collect();
 
                 // Create superblock path
                 let superblock_path =
@@ -176,9 +195,24 @@ impl CommandSubmitter {
                     db,
                     last_applied_op,
                     last_commit_advance,
+                    client_peers: client_peers_map,
                 })
             }
         }
+    }
+
+    /// Resolves the leader's client-facing address for `NotLeader`
+    /// responses by reading the live replicator's leader id + VSR
+    /// fallback address, then delegating to [`pick_leader_hint`].
+    fn resolve_leader_hint(
+        replicator: &MultiNodeReplicator,
+        client_peers: &HashMap<ReplicaId, SocketAddr>,
+    ) -> Option<SocketAddr> {
+        pick_leader_hint(
+            replicator.leader_id(),
+            replicator.leader_address(),
+            client_peers,
+        )
     }
 
     /// Applies `command` to `db`'s projection iff no larger op has been
@@ -308,6 +342,7 @@ impl CommandSubmitter {
                 db,
                 last_applied_op,
                 last_commit_advance,
+                client_peers,
             } => {
                 let mut repl = replicator
                     .write()
@@ -318,8 +353,9 @@ impl CommandSubmitter {
                     // Get the current view for the error response
                     let view = repl.view().as_u64();
 
-                    // Get the leader's address for client redirection
-                    let leader_hint = repl.leader_address();
+                    // Get the leader's client-facing address for SDK
+                    // retry-on-hint redirection.
+                    let leader_hint = Self::resolve_leader_hint(&repl, client_peers);
 
                     return Err(ServerError::NotLeader { view, leader_hint });
                 }
@@ -336,7 +372,7 @@ impl CommandSubmitter {
                     {
                         ServerError::NotLeader {
                             view: repl.view().as_u64(),
-                            leader_hint: repl.leader_address(),
+                            leader_hint: Self::resolve_leader_hint(&repl, client_peers),
                         }
                     } else {
                         ServerError::Replication(msg)
@@ -428,6 +464,7 @@ impl CommandSubmitter {
                 db,
                 last_applied_op,
                 last_commit_advance,
+                client_peers,
             } => {
                 let mut repl = replicator
                     .write()
@@ -436,7 +473,7 @@ impl CommandSubmitter {
                 if !repl.is_leader() {
                     return Err(ServerError::NotLeader {
                         view: repl.view().as_u64(),
-                        leader_hint: repl.leader_address(),
+                        leader_hint: Self::resolve_leader_hint(&repl, client_peers),
                     });
                 }
 
@@ -448,7 +485,7 @@ impl CommandSubmitter {
                         },
                         VsrError::NotLeader { view } => ServerError::NotLeader {
                             view: view.as_u64(),
-                            leader_hint: repl.leader_address(),
+                            leader_hint: Self::resolve_leader_hint(&repl, client_peers),
                         },
                         VsrError::Backpressure => ServerError::ServerBusy,
                         other => ServerError::Replication(other.to_string()),
@@ -555,7 +592,16 @@ impl CommandSubmitter {
                 ..
             } => {
                 let repl = replicator.read().ok();
-                let is_leader_now = repl.as_ref().is_some_and(|r| r.is_leader());
+                // Take a SINGLE atomic snapshot of shared state. Walking
+                // `is_leader()` + `view()` + `replica_status()` as
+                // separate lock acquisitions was the root cause of the
+                // boot-time `is_leader=1 / view=0` mismatch that drove
+                // `find_leader_replica` to return a non-leader replica.
+                // VSR's `EventLoopHandle::state()` clones `SharedState`
+                // under one read lock so every gauge in the response
+                // reflects the same `update_shared_state` write epoch.
+                let snapshot = repl.as_ref().map(|r| r.shared_state());
+                let is_leader_now = snapshot.as_ref().is_some_and(|s| s.is_leader);
                 // Leaders commit locally on every submit; surface 0 so
                 // dashboards don't false-page on a healthy leader.
                 // Followers compute (now - last apply); see the field
@@ -575,18 +621,16 @@ impl CommandSubmitter {
                     replica_id: repl
                         .as_ref()
                         .and_then(|r| r.config().replicas().next().map(|id| id.as_u8())),
-                    commit_number: repl.as_ref().map(|r| r.commit_number().as_u64()),
-                    view: repl.as_ref().map(|r| r.view().as_u64()),
-                    leader_id: repl
-                        .as_ref()
-                        .and_then(|r| r.leader_id().map(|id| id.as_u8())),
+                    commit_number: snapshot.as_ref().map(|s| s.commit_number.as_u64()),
+                    view: snapshot.as_ref().map(|s| s.view.as_u64()),
+                    leader_id: snapshot.as_ref().and_then(|s| s.leader_id).map(|id| id.as_u8()),
                     connected_peers: repl.as_ref().map(|r| {
                         // Get connected peers from the shared state
                         let state = r.cluster_config();
                         state.cluster_size().saturating_sub(1) // Approximate: cluster_size - 1
                     }),
-                    bootstrap_complete: repl.as_ref().map(|r| r.is_bootstrap_complete()),
-                    replica_status: repl.as_ref().map(|r| match r.replica_status() {
+                    bootstrap_complete: snapshot.as_ref().map(|s| s.bootstrap_complete),
+                    replica_status: snapshot.as_ref().map(|s| match s.status {
                         kimberlite_vsr::ReplicaStatus::Normal => "normal",
                         kimberlite_vsr::ReplicaStatus::ViewChange => "view_change",
                         kimberlite_vsr::ReplicaStatus::Recovering => "recovering",
@@ -705,6 +749,33 @@ pub struct ReplicationStatus {
     pub commit_lag_seconds: Option<f64>,
 }
 
+/// Pure resolver for `NotLeader::leader_hint`.
+///
+/// `MultiNodeReplicator::leader_address()` returns the VSR transport
+/// address (data_port + `VSR_PORT_OFFSET` in the supervisor-spawned
+/// topology); SDK clients dial the data port. When the boot path
+/// supplied a `client_peers` map we look the leader up there;
+/// otherwise we fall back to the VSR address so behaviour matches
+/// pre-graduation defaults.
+///
+/// A wrong hint is more useful to operators than a missing one
+/// because it still implicates a real replica in the response, so we
+/// fall back to `leader_vsr_address` whenever the client-peer lookup
+/// misses (mis-sized client_peers env, replica added without a
+/// matching client-peer row).
+fn pick_leader_hint(
+    leader_id: Option<ReplicaId>,
+    leader_vsr_address: Option<SocketAddr>,
+    client_peers: &HashMap<ReplicaId, SocketAddr>,
+) -> Option<SocketAddr> {
+    if client_peers.is_empty() {
+        return leader_vsr_address;
+    }
+    leader_id
+        .and_then(|id| client_peers.get(&id).copied())
+        .or(leader_vsr_address)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -757,6 +828,54 @@ mod tests {
         assert_eq!(status.mode, "single-node");
         assert!(status.is_leader);
         assert!(status.replica_id.is_some());
+    }
+
+    #[test]
+    fn pick_leader_hint_prefers_client_peer_over_vsr() {
+        // Real-world case: VSR transport at `data_port + 100`, client
+        // peers at the data port. Hint must come from the client map.
+        let mut client_peers = HashMap::new();
+        client_peers.insert(ReplicaId::new(0), "10.0.1.5:5000".parse().unwrap());
+        client_peers.insert(ReplicaId::new(1), "10.0.1.6:5001".parse().unwrap());
+        client_peers.insert(ReplicaId::new(2), "10.0.1.7:5002".parse().unwrap());
+
+        let leader_vsr: SocketAddr = "10.0.1.6:5101".parse().unwrap();
+        let hint = pick_leader_hint(Some(ReplicaId::new(1)), Some(leader_vsr), &client_peers);
+        assert_eq!(hint, Some("10.0.1.6:5001".parse().unwrap()));
+    }
+
+    #[test]
+    fn pick_leader_hint_falls_back_to_vsr_when_map_empty() {
+        // Pre-graduation behaviour: when no client map was supplied,
+        // surface the VSR address rather than dropping the hint.
+        let client_peers: HashMap<ReplicaId, SocketAddr> = HashMap::new();
+        let leader_vsr: SocketAddr = "10.0.1.6:5101".parse().unwrap();
+        let hint = pick_leader_hint(Some(ReplicaId::new(1)), Some(leader_vsr), &client_peers);
+        assert_eq!(hint, Some(leader_vsr));
+    }
+
+    #[test]
+    fn pick_leader_hint_falls_back_to_vsr_when_leader_missing_from_map() {
+        // Defensive: mis-sized client_peers env shouldn't drop the
+        // hint entirely. A wrong hint still implicates a real replica.
+        let mut client_peers = HashMap::new();
+        client_peers.insert(ReplicaId::new(0), "10.0.1.5:5000".parse().unwrap());
+        // Replica 1 is the leader but absent from the client map.
+
+        let leader_vsr: SocketAddr = "10.0.1.6:5101".parse().unwrap();
+        let hint = pick_leader_hint(Some(ReplicaId::new(1)), Some(leader_vsr), &client_peers);
+        assert_eq!(hint, Some(leader_vsr));
+    }
+
+    #[test]
+    fn pick_leader_hint_returns_none_when_no_leader_id_and_no_vsr() {
+        // During a view change with no committed leader yet, both
+        // inputs may be None — the hint is genuinely unknown.
+        let mut client_peers = HashMap::new();
+        client_peers.insert(ReplicaId::new(0), "10.0.1.5:5000".parse().unwrap());
+
+        let hint = pick_leader_hint(None, None, &client_peers);
+        assert_eq!(hint, None);
     }
 
     #[test]
