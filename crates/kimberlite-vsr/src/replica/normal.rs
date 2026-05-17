@@ -442,6 +442,43 @@ impl ReplicaState {
             return (self, ReplicaOutput::empty());
         }
 
+        // Higher-view catch-up MUST be checked before the
+        // leader-of-self-view filter below: a replica that rejoined
+        // after being the leader of an old view still has
+        // `self.leader() == self.replica_id`, so a heartbeat from the
+        // real leader of a higher view fails the leader check and
+        // gets silently dropped. That leaves the rejoined replica
+        // stuck reporting `is_leader=1` at an obsolete view forever,
+        // and the cluster ends up with two leaders.
+        //
+        // We use `start_state_transfer` (not `start_view_change_to`)
+        // here: the new leader is already in `Normal` at the higher
+        // view, so re-running the view-change protocol cascades —
+        // peers in `Normal` that receive a `StartViewChange` for
+        // their current view interpret it as "current leader is
+        // dead" and bump again to the next view (`on_start_view_change`
+        // line 134). Empirically that cascade lands the cluster at
+        // an unpredictable view, sometimes on one where the
+        // rejoining old leader is the leader-of-record again, and
+        // the integration test sees `leader_after == leader`. State
+        // transfer is the correct primitive: r0 stays Normal, asks
+        // peers for their committed state, applies it, and the
+        // response upgrades `self.view` to the cluster's current view
+        // with no view-change side effects.
+        if heartbeat.view > self.view
+            && from == self.config.leader_for_view(heartbeat.view)
+        {
+            tracing::info!(
+                replica = %self.replica_id,
+                our_view = %self.view,
+                msg_view = %heartbeat.view,
+                from = %from,
+                "received Heartbeat from higher view, initiating state transfer"
+            );
+            let (new_self, output) = self.start_state_transfer(Some(heartbeat.view));
+            return (new_self, output);
+        }
+
         // Message must be from the leader
         if from != self.leader() {
             return (self, ReplicaOutput::empty());
@@ -449,14 +486,9 @@ impl ReplicaState {
 
         // View must match
         if heartbeat.view != self.view {
-            // If higher view, we might need to catch up
-            if heartbeat.view > self.view {
-                tracing::debug!(
-                    our_view = %self.view,
-                    msg_view = %heartbeat.view,
-                    "received Heartbeat from higher view"
-                );
-            }
+            // If higher view, we might need to catch up — handled
+            // above before the leader filter; lower-view heartbeats
+            // are stale and dropped.
             return (self, ReplicaOutput::empty());
         }
 
