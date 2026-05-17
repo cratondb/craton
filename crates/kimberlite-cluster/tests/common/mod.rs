@@ -212,7 +212,8 @@ pub fn find_leader_replica(base_port: u16, node_count: u16, deadline: Duration) 
         for replica in 0..node_count {
             let addr = format!("127.0.0.1:{}", base_port + HTTP_PORT_OFFSET + replica);
             if let Ok(resp) = http_get(&addr, "/metrics") {
-                if resp.status == 200 && resp.body.contains("kimberlite_is_leader 1") {
+                if resp.status == 200 && parse_gauge(&resp.body, "kimberlite_is_leader") == Some(1.0)
+                {
                     leaders.push(replica);
                 }
             }
@@ -221,6 +222,38 @@ pub fn find_leader_replica(base_port: u16, node_count: u16, deadline: Duration) 
             return Some(leaders[0]);
         }
         std::thread::sleep(Duration::from_millis(200));
+    }
+    None
+}
+
+/// Extracts the numeric value of a Prometheus gauge from a `/metrics`
+/// text exposition.
+///
+/// Looks for the FIRST data line of the form `<gauge> <value>` — i.e.
+/// not starting with `#` (which would be a `# HELP` / `# TYPE`
+/// comment) — and parses the trailing whitespace-separated token as
+/// `f64`.
+///
+/// Returns `None` if the gauge is absent or unparseable. Substring
+/// matches against the raw body are unsafe here: Prometheus's `HELP`
+/// comment embeds the gauge description verbatim, so
+/// `body.contains("kimberlite_is_leader 1")` happily matches the
+/// `# HELP kimberlite_is_leader 1 if this replica…` line on every
+/// replica regardless of the gauge value. That false-positive sent
+/// `find_leader_replica` chasing the wrong replica during boot and
+/// drove the v0.9.x integration-test flake.
+pub fn parse_gauge(body: &str, name: &str) -> Option<f64> {
+    for line in body.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        let mut parts = trimmed.split_whitespace();
+        let first = parts.next()?;
+        if first != name {
+            continue;
+        }
+        return parts.next().and_then(|v| v.parse().ok());
     }
     None
 }

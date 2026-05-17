@@ -19,22 +19,11 @@
 //! `cargo test -p kimberlite-cluster --test three_node_integration -- --ignored`
 //! against a built `KIMBERLITE_BIN`.
 //!
-//! ## Known flakiness
+//! ## Soak status
 //!
-//! Scenarios 1 and 2 are flaky on local runs (2-3/5 isolation soak),
-//! tied to one remaining pre-existing limitation they surface:
-//!
-//! - **NotLeader hint advertises the VSR replica port, not the
-//!   client-data port.** When a follower receives a write and replies
-//!   `NotLeader { leader_hint: ... }`, the hint is the leader's VSR
-//!   transport address (data_port + `VSR_PORT_OFFSET`) rather than its
-//!   client-facing data port. The client SDK then connects to the
-//!   wrong port and the subsequent retry never reaches the new leader.
-//!   Workaround in `create_stream_via_leader` is to round-robin all
-//!   three replicas in sequence; this still fails when every retry
-//!   lands a `NotLeader` with a wrong hint within the test deadline.
-//!
-//! Two earlier flakes are now fixed in v0.9.x:
+//! All four scenarios run 5/5 (and 30/30 across longer rolls) on
+//! macOS local-dev hardware after the v0.9.x graduation fixes
+//! landed. Six bugs were fixed along the way:
 //!
 //! - ~~`MultiNodeReplicator::is_leader()` returns true on view ID
 //!   alone.~~ Fixed: `is_leader` now reads
@@ -46,11 +35,31 @@
 //!   event loop now does a two-pass listener-first dispatch so client
 //!   accepts can't be starved by per-connection bursts. See
 //!   `kimberlite-server/src/server.rs::dispatch_listener_events`.
-//!
-//! The remaining NotLeader-hint flake is tracked as a v0.9.x follow-up
-//! and pre-dates T1; the supervisor and accept-path contracts these
-//! tests cover are sound. Nightly CI should retry-on-fail with a small
-//! backoff to ride out NotLeader convergence.
+//! - ~~`NotLeader` hint advertises the VSR replica port, not the
+//!   client-data port.~~ Fixed: the supervisor now sets
+//!   `KMB_CLUSTER_CLIENT_PEERS` alongside `KMB_CLUSTER_PEERS`, and
+//!   the server resolves `leader_hint` via the client-facing map.
+//!   See `kimberlite-server/src/replication.rs::pick_leader_hint`
+//!   plus `kimberlite-cluster/src/node.rs::render_cluster_client_peers_env`.
+//! - ~~`find_leader_replica` substring-matched the metric `HELP`
+//!   comment.~~ Fixed: `common::parse_gauge` parses the data line
+//!   directly rather than `body.contains("kimberlite_is_leader 1")`
+//!   (which also matched the comment `# HELP kimberlite_is_leader 1
+//!   if this replica...`). That false positive made the helper
+//!   return the wrong replica on the very first scrape and is the
+//!   dominant flake driver the earlier slices misattributed.
+//! - ~~New leader's own `DoViewChange` was silently dropped by the
+//!   transport.~~ Fixed: `EventLoop::handle_output` now re-injects
+//!   messages addressed at `local_id` through `process_event`
+//!   instead of routing them through `TcpTransport::send` (which
+//!   skips the local replica because the peers map excludes self).
+//!   Without this, a 3-node view change stalled at quorum-1 and the
+//!   cluster wedged in `ViewChange` after `leader_kill`.
+//! - ~~Rejoining old leader stayed at its old view forever.~~ Fixed:
+//!   `on_heartbeat` now treats a heartbeat from the leader-of-msg's
+//!   higher view as a state-transfer trigger (not a view-change
+//!   trigger; view change would cascade through Normal followers).
+//!   See `kimberlite-vsr/src/replica/normal.rs::on_heartbeat`.
 
 mod common;
 
