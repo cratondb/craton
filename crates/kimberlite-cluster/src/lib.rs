@@ -12,6 +12,9 @@ pub mod error;
 pub mod node;
 pub mod supervisor;
 
+#[doc(hidden)]
+pub mod testing;
+
 pub use backup::{
     BackupEntry, BackupSummary, RestoreSummary, backup_cluster, restore_cluster,
 };

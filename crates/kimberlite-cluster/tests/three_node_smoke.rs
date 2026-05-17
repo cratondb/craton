@@ -12,10 +12,11 @@
 //!   - SIGKILL'ing a follower triggers supervisor restart with bounded
 //!     backoff, observable via `NodeStatus`.
 
-use std::net::TcpStream;
-use std::path::PathBuf;
+mod common;
+
 use std::time::{Duration, Instant};
 
+use common::{locate_built_kimberlite, pick_base_port, wait_for_tcp_ready};
 use kimberlite_client::{Client, ClientConfig};
 use kimberlite_cluster::{ClusterSupervisor, NodeStatus};
 use kimberlite_types::{DataClass, Offset, TenantId};
@@ -25,100 +26,6 @@ use tempfile::TempDir;
 /// give tenant 1 a healthcare profile out of the box, matching the
 /// pivot's quickstart story.
 const SMOKE_TENANT: u64 = 1;
-
-/// Locates a built `kimberlite` binary by walking up from this crate's
-/// manifest dir to `target/{debug,release}/kimberlite`. Returns `None`
-/// if no binary exists yet — in which case the test should skip rather
-/// than fail, since the binary is built on demand by the dev workflow.
-fn locate_built_kimberlite() -> Option<PathBuf> {
-    if let Ok(env_override) = std::env::var("KIMBERLITE_BIN") {
-        let p = PathBuf::from(env_override);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-
-    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let mut cursor: &std::path::Path = crate_dir.as_path();
-    loop {
-        for profile in ["debug", "release"] {
-            let candidate = cursor.join("target").join(profile).join("kimberlite");
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-        match cursor.parent() {
-            Some(parent) => cursor = parent,
-            None => return None,
-        }
-    }
-}
-
-/// Reserves a base port such that the data-port trio (base..=base+2),
-/// the VSR-port trio (base+100..=base+102), and the HTTP-probe trio
-/// (base+1000..=base+1002) are all simultaneously bindable on
-/// 127.0.0.1. Each spawned node uses one port from each band; the
-/// supervisor's port-offset convention is documented on
-/// [`kimberlite_cluster::node::VSR_PORT_OFFSET`].
-fn pick_base_port() -> u16 {
-    for _attempt in 0..32 {
-        let probe = std::net::TcpListener::bind("127.0.0.1:0")
-            .expect("bind probe socket")
-            .local_addr()
-            .expect("probe local_addr")
-            .port();
-        // Round down to a base that leaves headroom for +100 / +1000
-        // offsets without overflowing u16. Skip ephemeral-range probes
-        // that would put the HTTP band above 65k.
-        let candidate = probe.saturating_sub(probe % 10);
-        if candidate < 10_000 || u32::from(candidate) + 1_002 > u32::from(u16::MAX) {
-            continue;
-        }
-        let mut bound = Vec::with_capacity(9);
-        let mut ok = true;
-        for offset in [0_u16, 1, 2, 100, 101, 102, 1_000, 1_001, 1_002] {
-            match std::net::TcpListener::bind(("127.0.0.1", candidate + offset)) {
-                Ok(listener) => bound.push(listener),
-                Err(_) => {
-                    ok = false;
-                    break;
-                }
-            }
-        }
-        drop(bound);
-        if ok {
-            return candidate;
-        }
-    }
-    panic!("could not find a free port band after 32 attempts");
-}
-
-/// Polls the data port of every node until it accepts a TCP connection,
-/// or the deadline elapses. Real readiness (handshake success, leader
-/// election quorum) is the test body's concern.
-async fn wait_for_tcp_ready(base_port: u16, node_count: u16, deadline: Duration) {
-    let stop = Instant::now() + deadline;
-    while Instant::now() < stop {
-        let mut all_up = true;
-        for offset in 0..node_count {
-            let addr = format!("127.0.0.1:{}", base_port + offset);
-            if TcpStream::connect_timeout(
-                &addr.parse().expect("addr parses"),
-                Duration::from_millis(200),
-            )
-            .is_err()
-            {
-                all_up = false;
-                break;
-            }
-        }
-        if all_up {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-    panic!("nodes never accepted TCP connections within {deadline:?}");
-}
 
 /// Best-effort cluster shutdown for use in test teardown — swallows
 /// errors so an assertion failure inside the test body still surfaces
@@ -159,7 +66,7 @@ async fn three_node_cluster_smoke() {
         .await
         .expect("start_cluster");
 
-    wait_for_tcp_ready(base_port, 3, Duration::from_secs(15)).await;
+    wait_for_tcp_ready(base_port, 3, Duration::from_secs(15));
 
     // Drive the smoke through the assumed leader (replica 0). VSR may
     // re-elect, but for a fresh boot replica 0 starts as the primary.
@@ -263,7 +170,7 @@ async fn supervisor_restarts_killed_follower() {
         .await
         .expect("start_cluster");
 
-    wait_for_tcp_ready(base_port, 3, Duration::from_secs(15)).await;
+    wait_for_tcp_ready(base_port, 3, Duration::from_secs(15));
 
     // Capture follower 1's PID, then SIGKILL it via tokio's cross-platform
     // start_kill (which sends SIGKILL on Unix). We don't take ownership
