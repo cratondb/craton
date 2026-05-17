@@ -1,6 +1,6 @@
 [package]
 name = "kimberlite-cluster"
-description = "Multi-node cluster orchestration for Kimberlite (not ready for public use)"
+description = "Multi-node cluster orchestration for Kimberlite — supervisor, VSR integration, HTTP probes, backup/restore"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
