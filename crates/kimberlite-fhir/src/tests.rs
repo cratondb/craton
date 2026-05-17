@@ -43,10 +43,7 @@ fn full_clinical_bundle_round_trips() {
     assert_eq!(bundle.entry.len(), 2);
 
     // Downcast each entry to its typed resource shape.
-    let p = bundle.entry[0]
-        .as_resource::<Patient>()
-        .unwrap()
-        .unwrap();
+    let p = bundle.entry[0].as_resource::<Patient>().unwrap().unwrap();
     assert_eq!(p.id(), Some("p1"));
 
     let o = bundle.entry[1]

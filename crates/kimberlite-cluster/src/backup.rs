@@ -212,10 +212,7 @@ pub fn restore_cluster(archive_path: &Path, new_data_dir: &Path) -> Result<Resto
 
     for entry in tar.entries().map_err(Error::Io)? {
         let mut entry = entry.map_err(Error::Io)?;
-        let path_in_tar = entry
-            .path()
-            .map_err(Error::Io)?
-            .into_owned();
+        let path_in_tar = entry.path().map_err(Error::Io)?.into_owned();
 
         if path_in_tar == Path::new("MANIFEST") {
             let mut buf = Vec::new();
@@ -244,9 +241,7 @@ pub fn restore_cluster(archive_path: &Path, new_data_dir: &Path) -> Result<Resto
     }
 
     let manifest_bytes = manifest_bytes.ok_or_else(|| {
-        Error::Config(
-            "archive has no MANIFEST — not a Kimberlite cluster backup".to_string(),
-        )
+        Error::Config("archive has no MANIFEST — not a Kimberlite cluster backup".to_string())
     })?;
     let entries = parse_manifest(&manifest_bytes)?;
 
@@ -324,8 +319,8 @@ fn render_manifest(magic: &str, created_at_secs: u64, entries: &[BackupEntry]) -
 
 /// Parses a MANIFEST written by [`render_manifest`] back into entries.
 fn parse_manifest(bytes: &[u8]) -> Result<Vec<BackupEntry>> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|e| Error::Config(format!("manifest utf-8: {e}")))?;
+    let text =
+        std::str::from_utf8(bytes).map_err(|e| Error::Config(format!("manifest utf-8: {e}")))?;
     // First non-comment line is the magic header (commented).
     let mut saw_magic = false;
     let mut entries: Vec<BackupEntry> = Vec::new();
@@ -342,9 +337,7 @@ fn parse_manifest(bytes: &[u8]) -> Result<Vec<BackupEntry>> {
         }
         let parts: Vec<&str> = trimmed.splitn(3, "  ").collect();
         if parts.len() != 3 {
-            return Err(Error::Config(format!(
-                "manifest line malformed: {trimmed}"
-            )));
+            return Err(Error::Config(format!("manifest line malformed: {trimmed}")));
         }
         let size_bytes = parts[1]
             .parse::<u64>()
@@ -406,7 +399,10 @@ mod tests {
         // Fake payload bytes per node — backup must capture EVERYTHING
         // under cluster/, not just files matching a known suffix.
         for node in &config.topology.nodes {
-            let node_dir = node.data_dir.canonicalize().unwrap_or(node.data_dir.clone());
+            let node_dir = node
+                .data_dir
+                .canonicalize()
+                .unwrap_or(node.data_dir.clone());
             write_file(&node_dir.join("projections.db"), &vec![0x42u8; 4096]);
             write_file(
                 &node_dir.join("stream-1").join("segment_000001.log"),
@@ -440,8 +436,7 @@ mod tests {
             archive_path.display()
         );
 
-        let restore =
-            restore_cluster(&archive_path, dst.path()).expect("restore");
+        let restore = restore_cluster(&archive_path, dst.path()).expect("restore");
         assert_eq!(restore.file_count, backup.file_count);
         assert_eq!(restore.uncompressed_bytes, backup.uncompressed_bytes);
 
@@ -514,11 +509,16 @@ mod tests {
         // production path takes — by re-restoring into a third dir
         // we'd recompute hashes, so tamper dst2's file and recompute
         // by hand.
-        write_file(&dst2.path().join("cluster").join(v.file_name().unwrap()), b"tampered");
+        write_file(
+            &dst2.path().join("cluster").join(v.file_name().unwrap()),
+            b"tampered",
+        );
         // The above isn't on the same path as the original; we just
         // sanity-check that verify_blake3 catches a mismatch.
-        let bad =
-            verify_blake3(&dst2.path().join("cluster").join(v.file_name().unwrap()), "deadbeef");
+        let bad = verify_blake3(
+            &dst2.path().join("cluster").join(v.file_name().unwrap()),
+            "deadbeef",
+        );
         assert!(matches!(bad, Err(Error::Config(_))));
     }
 

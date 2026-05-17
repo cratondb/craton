@@ -73,6 +73,7 @@ pub mod encryption;
 pub mod error;
 pub mod field;
 pub mod hash;
+pub mod kms;
 pub mod signature;
 
 // Verified cryptographic implementations with Coq proof certificates

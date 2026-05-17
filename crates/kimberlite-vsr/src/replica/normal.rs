@@ -465,9 +465,7 @@ impl ReplicaState {
         // peers for their committed state, applies it, and the
         // response upgrades `self.view` to the cluster's current view
         // with no view-change side effects.
-        if heartbeat.view > self.view
-            && from == self.config.leader_for_view(heartbeat.view)
-        {
+        if heartbeat.view > self.view && from == self.config.leader_for_view(heartbeat.view) {
             tracing::info!(
                 replica = %self.replica_id,
                 our_view = %self.view,

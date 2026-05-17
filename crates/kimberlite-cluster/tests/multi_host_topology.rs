@@ -77,12 +77,9 @@ async fn multi_host_init_and_per_node_start_end_to_end() {
     // KMB_CLUSTER_PEERS with all three IPs/ports.
     let mut supervisors: Vec<ClusterSupervisor> = Vec::with_capacity(3);
     for node_id in 0..3 {
-        let supervisor = kimberlite_cluster::start_cluster_node(
-            temp.path().to_path_buf(),
-            node_id,
-        )
-        .await
-        .unwrap_or_else(|e| panic!("start_cluster_node({node_id}) failed: {e}"));
+        let supervisor = kimberlite_cluster::start_cluster_node(temp.path().to_path_buf(), node_id)
+            .await
+            .unwrap_or_else(|e| panic!("start_cluster_node({node_id}) failed: {e}"));
 
         // Sanity: this supervisor only owns one local entry, but the
         // full topology is preserved for peer addressing.
@@ -165,12 +162,9 @@ async fn init_with_hosts_rejects_duplicate_endpoints() {
     let temp = TempDir::new().expect("temp dir");
     // Two nodes claiming the same data port — this is the cluster.toml
     // hand-edit failure mode. Validation must reject *before* spawn.
-    let mut config = init_cluster_with_hosts(
-        temp.path().to_path_buf(),
-        &["127.0.0.1", "127.0.0.1"],
-        5432,
-    )
-    .expect("baseline init");
+    let mut config =
+        init_cluster_with_hosts(temp.path().to_path_buf(), &["127.0.0.1", "127.0.0.1"], 5432)
+            .expect("baseline init");
 
     // Force the collision and re-save so `ClusterConfig::load` re-validates.
     config.topology.nodes[1].port = 5432;

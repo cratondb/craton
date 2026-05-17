@@ -122,7 +122,10 @@ mod tests {
     fn resource_type_field_is_emitted() {
         let bytes = alice().to_json().unwrap();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(v.get("resourceType").and_then(|x| x.as_str()), Some("Patient"));
+        assert_eq!(
+            v.get("resourceType").and_then(|x| x.as_str()),
+            Some("Patient")
+        );
     }
 
     #[test]

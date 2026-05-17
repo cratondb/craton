@@ -336,7 +336,6 @@ pub enum ScenarioType {
     // in subsequent commits. Each variant pins the clinical workload
     // shape together with the audit-grade invariant it MUST satisfy.
     // ========================================================================
-
     /// **EHR admissions surge** — 10x burst of ADT^A01 messages
     /// arriving via MLLP (flu season, mass-casualty triage, scheduled
     /// open-enrollment day). The PV1 visit creation and the
@@ -414,7 +413,6 @@ pub enum ScenarioType {
     // graduation plan lands. See
     // docs-internal/design-docs/active/cluster-graduation-v0.9.x.md.
     // ========================================================================
-
     /// **Cluster: single-node process crash** — SIGKILL one
     /// follower's `kimberlite start` subprocess. The supervisor
     /// MUST detect the death within `health_check_interval_ms`,
@@ -1231,9 +1229,7 @@ impl ScenarioConfig {
             | ScenarioType::LabResultDelayedDelivery
             | ScenarioType::ClaimsBatchReconciliation
             | ScenarioType::BreakGlassUnderLoad
-            | ScenarioType::ConsentRevocationCascade => {
-                Self::aspirational_v07(scenario_type)
-            }
+            | ScenarioType::ConsentRevocationCascade => Self::aspirational_v07(scenario_type),
 
             // Q2 (v0.9.x) — Cluster supervisor scenarios. Each driver
             // expresses the fault shape the real `kimberlite-cluster`

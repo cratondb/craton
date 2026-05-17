@@ -216,7 +216,8 @@ pub fn find_leader_replica(base_port: u16, node_count: u16, deadline: Duration) 
         for replica in 0..node_count {
             let addr = format!("127.0.0.1:{}", base_port + HTTP_PORT_OFFSET + replica);
             if let Ok(resp) = http_get(&addr, "/metrics") {
-                if resp.status == 200 && parse_gauge(&resp.body, "kimberlite_is_leader") == Some(1.0)
+                if resp.status == 200
+                    && parse_gauge(&resp.body, "kimberlite_is_leader") == Some(1.0)
                 {
                     leaders.push(replica);
                 }

@@ -77,7 +77,8 @@ async fn boot() -> Option<(ClusterSupervisor, u16, TempDir)> {
 }
 
 fn connect(addr: &str) -> Result<Client, String> {
-    Client::connect(addr, TenantId::new(TENANT), ClientConfig::default()).map_err(|e| format!("{e}"))
+    Client::connect(addr, TenantId::new(TENANT), ClientConfig::default())
+        .map_err(|e| format!("{e}"))
 }
 
 /// Round-robins all `NODES` replicas, returning the first client that
@@ -158,7 +159,9 @@ impl Stats {
         let n = samples.len();
         let p50 = samples[n / 2];
         // p99 index via nearest-rank; for small N this collapses to max.
-        let p99 = samples[((n as f64 * 0.99).ceil() as usize).saturating_sub(1).min(n - 1)];
+        let p99 = samples[((n as f64 * 0.99).ceil() as usize)
+            .saturating_sub(1)
+            .min(n - 1)];
         let max = *samples.last().expect("non-empty");
         let min = *samples.first().expect("non-empty");
         let sum_nanos: u128 = samples.iter().map(Duration::as_nanos).sum();
@@ -194,7 +197,9 @@ impl Stats {
 #[ignore = "perf baseline; spawns real kimberlite processes; run with --ignored --nocapture perf"]
 async fn perf_rto_leader_kill() {
     let Some(_bin) = locate_built_kimberlite() else {
-        eprintln!("skipping: no built kimberlite binary; set KIMBERLITE_BIN or `cargo build --release`");
+        eprintln!(
+            "skipping: no built kimberlite binary; set KIMBERLITE_BIN or `cargo build --release`"
+        );
         return;
     };
     let iters = iterations();
@@ -219,17 +224,14 @@ async fn perf_rto_leader_kill() {
         // committed VSR op and a stable stream_id for the post-kill
         // probe.
         let stream_name = format!("rto-iter-{i}");
-        let (_, stream_id) = match create_stream_anywhere(
-            base_port,
-            &stream_name,
-            Duration::from_secs(15),
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                teardown(supervisor).await;
-                panic!("iter {i}: pre-kill create_stream failed: {e}");
-            }
-        };
+        let (_, stream_id) =
+            match create_stream_anywhere(base_port, &stream_name, Duration::from_secs(15)) {
+                Ok(s) => s,
+                Err(e) => {
+                    teardown(supervisor).await;
+                    panic!("iter {i}: pre-kill create_stream failed: {e}");
+                }
+            };
 
         // SIGKILL the leader and clock the recovery window. Don't
         // call supervise_once — the surviving replicas must elect on
@@ -303,7 +305,9 @@ async fn perf_rpo_leader_kill() {
     const WRITES_PER_ITER: usize = 100;
 
     let Some(_bin) = locate_built_kimberlite() else {
-        eprintln!("skipping: no built kimberlite binary; set KIMBERLITE_BIN or `cargo build --release`");
+        eprintln!(
+            "skipping: no built kimberlite binary; set KIMBERLITE_BIN or `cargo build --release`"
+        );
         return;
     };
     let iters = iterations();
@@ -338,17 +342,14 @@ async fn perf_rpo_leader_kill() {
         };
 
         let stream_name = format!("rpo-iter-{i}");
-        let (_, stream_id) = match create_stream_anywhere(
-            base_port,
-            &stream_name,
-            Duration::from_secs(15),
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                teardown(supervisor).await;
-                panic!("iter {i}: pre-kill create_stream failed: {e}");
-            }
-        };
+        let (_, stream_id) =
+            match create_stream_anywhere(base_port, &stream_name, Duration::from_secs(15)) {
+                Ok(s) => s,
+                Err(e) => {
+                    teardown(supervisor).await;
+                    panic!("iter {i}: pre-kill create_stream failed: {e}");
+                }
+            };
 
         // Write WRITES_PER_ITER sequenced payloads through the leader.
         // Each ack means VSR committed → durable on a quorum.
@@ -452,7 +453,10 @@ async fn perf_rpo_leader_kill() {
     eprintln!("=== RPO (acked writes lost after leader SIGKILL) ===");
     eprintln!("iterations:        {iters}");
     eprintln!("completed:         {completed}");
-    eprintln!("view-change stalls: {} (iters: {stalled_iters:?})", stalled_iters.len());
+    eprintln!(
+        "view-change stalls: {} (iters: {stalled_iters:?})",
+        stalled_iters.len()
+    );
     eprintln!("writes per iter (target): {WRITES_PER_ITER}");
     eprintln!("acked per completed iter:    {per_iter_acked:?}");
     eprintln!("readable per completed iter: {per_iter_readable:?}");
@@ -486,7 +490,9 @@ async fn perf_rpo_leader_kill() {
 #[ignore = "perf baseline; spawns real kimberlite processes; run with --ignored --nocapture perf"]
 async fn perf_sustained_write_throughput() {
     let Some(_bin) = locate_built_kimberlite() else {
-        eprintln!("skipping: no built kimberlite binary; set KIMBERLITE_BIN or `cargo build --release`");
+        eprintln!(
+            "skipping: no built kimberlite binary; set KIMBERLITE_BIN or `cargo build --release`"
+        );
         return;
     };
 

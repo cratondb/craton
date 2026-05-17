@@ -326,7 +326,9 @@ impl ReplicationMode {
                 });
             }
             if parsed.len() % 2 == 0 {
-                return Err(ClusterConfigError::EvenNodeCount { count: parsed.len() });
+                return Err(ClusterConfigError::EvenNodeCount {
+                    count: parsed.len(),
+                });
             }
             let replica = ReplicaId::new(replica_id);
             if !parsed.iter().any(|(id, _)| *id == replica) {
@@ -553,7 +555,9 @@ mod tests {
             .map(|i| {
                 (
                     ReplicaId::new(i),
-                    format!("127.0.0.1:{}", 5100 + u16::from(i)).parse().unwrap(),
+                    format!("127.0.0.1:{}", 5100 + u16::from(i))
+                        .parse()
+                        .unwrap(),
                 )
             })
             .collect();
@@ -561,7 +565,9 @@ mod tests {
             .map(|i| {
                 (
                     ReplicaId::new(i),
-                    format!("127.0.0.1:{}", 5000 + u16::from(i)).parse().unwrap(),
+                    format!("127.0.0.1:{}", 5000 + u16::from(i))
+                        .parse()
+                        .unwrap(),
                 )
             })
             .collect();

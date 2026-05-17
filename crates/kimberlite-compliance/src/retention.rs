@@ -46,6 +46,99 @@ pub type Result<T> = std::result::Result<T, RetentionError>;
 /// recording who accessed it must persist.
 pub const HIPAA_AUDIT_LOG_MIN_DAYS: u32 = 2_190;
 
+/// Default age of majority in the United States (most states).
+/// Outliers covered by [`age_of_majority_years_for_state`]: AL/NE = 19,
+/// MS = 21. Other jurisdictions need the override.
+pub const DEFAULT_AGE_OF_MAJORITY_YEARS: u32 = 18;
+
+/// Default pediatric records extension. The patient's records must be
+/// kept this many years *past* age of majority, per the most common
+/// state rule (e.g. NY § 18 NYCRR 405.10 — 6y after age-of-majority).
+/// States vary 2–10 years; callers pass an explicit value when the
+/// default doesn't apply.
+pub const DEFAULT_PEDIATRIC_EXTENSION_YEARS: u32 = 6;
+
+/// Age-of-majority lookup for U.S. states with non-default rules.
+/// Returns the default (18) for any unrecognised input; callers should
+/// supply the explicit value when the state isn't a simple
+/// 2-letter postal code.
+pub fn age_of_majority_years_for_state(state_postal: &str) -> u32 {
+    match state_postal.to_ascii_uppercase().as_str() {
+        // 19 in AL and NE.
+        "AL" | "NE" => 19,
+        // 21 in MS.
+        "MS" => 21,
+        _ => DEFAULT_AGE_OF_MAJORITY_YEARS,
+    }
+}
+
+/// Pediatric retention rule. Records in the stream must be retained
+/// until the patient reaches age of majority plus the extension
+/// period. The rule is birthdate-anchored, so its expiry date is
+/// patient-specific — this is the v1 shape used by per-patient
+/// outboard streams (one stream per pediatric subject).
+///
+/// Per-record pediatric rules in a multi-subject stream are a v0.11
+/// scope item; they require schema-level birthdate carriage and a
+/// per-record retention check inside the kernel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PediatricRetention {
+    /// Patient date of birth, as a `SystemTime` (UNIX epoch + offset).
+    /// Birthdates before 1970 are represented as UNIX_EPOCH (the rule
+    /// is non-binding for adult patients anyway).
+    pub birthdate: SystemTime,
+    /// Age of majority in years. Defaults to
+    /// [`DEFAULT_AGE_OF_MAJORITY_YEARS`]; use
+    /// [`age_of_majority_years_for_state`] for per-state lookup.
+    pub age_of_majority_years: u32,
+    /// Years of extension past age of majority. Defaults to
+    /// [`DEFAULT_PEDIATRIC_EXTENSION_YEARS`].
+    pub extension_years: u32,
+}
+
+impl PediatricRetention {
+    /// Convenience constructor using all defaults (most U.S. states).
+    pub fn default_us(birthdate: SystemTime) -> Self {
+        Self {
+            birthdate,
+            age_of_majority_years: DEFAULT_AGE_OF_MAJORITY_YEARS,
+            extension_years: DEFAULT_PEDIATRIC_EXTENSION_YEARS,
+        }
+    }
+
+    /// State-aware constructor. Falls back to defaults when the state
+    /// has no non-default age of majority.
+    pub fn for_state(birthdate: SystemTime, state_postal: &str) -> Self {
+        Self {
+            birthdate,
+            age_of_majority_years: age_of_majority_years_for_state(state_postal),
+            extension_years: DEFAULT_PEDIATRIC_EXTENSION_YEARS,
+        }
+    }
+
+    /// Minimum retention end-date for the subject. Records must be
+    /// kept until at least this instant. Saturates if the addition
+    /// would overflow.
+    pub fn retain_until(&self) -> SystemTime {
+        let total_years = self
+            .age_of_majority_years
+            .saturating_add(self.extension_years);
+        // ~365.2425-day year accommodates leap years close enough for
+        // a 18+6=24 year horizon. Closed-form is fine for compliance
+        // timing (we're not navigating spacecraft).
+        let total_days = u64::from(total_years) * 36_524 / 100;
+        let total_seconds = total_days.saturating_mul(86_400);
+        self.birthdate
+            .checked_add(std::time::Duration::from_secs(total_seconds))
+            .unwrap_or(SystemTime::UNIX_EPOCH)
+    }
+
+    /// True iff `now` is at or past the rule's retention horizon.
+    pub fn is_expired(&self, now: SystemTime) -> bool {
+        now >= self.retain_until()
+    }
+}
+
 /// Kind of stream — drives whether `RetentionPolicy::for_audit_log()` or
 /// `RetentionPolicy::from_data_class()` applies. The two classes can
 /// have different minimum retention, and audit-log streams are exempt
@@ -82,6 +175,11 @@ pub struct RetentionPolicy {
     /// What kind of stream this policy applies to. Audit-log streams
     /// have HIPAA's 6-year minimum independent of the data class.
     pub stream_kind: StreamKind,
+    /// Pediatric (birthdate-anchored) retention rule. When present,
+    /// the rule's `retain_until` is the effective minimum regardless
+    /// of `min_retention_days` — pediatric records must be kept until
+    /// the patient reaches age-of-majority + extension, period.
+    pub pediatric: Option<PediatricRetention>,
 }
 
 impl RetentionPolicy {
@@ -95,6 +193,7 @@ impl RetentionPolicy {
             legal_hold: false,
             hold_reason: None,
             stream_kind: StreamKind::Data,
+            pediatric: None,
         }
     }
 
@@ -111,6 +210,7 @@ impl RetentionPolicy {
             legal_hold: false,
             hold_reason: None,
             stream_kind: StreamKind::AuditLog,
+            pediatric: None,
         }
     }
 
@@ -122,7 +222,26 @@ impl RetentionPolicy {
             legal_hold: false,
             hold_reason: None,
             stream_kind: StreamKind::Data,
+            pediatric: None,
         }
+    }
+
+    /// Pediatric (birthdate-anchored) retention policy. Use for
+    /// per-patient outboard streams in clinical systems. The
+    /// pediatric rule overrides the standard `min_retention_days`
+    /// — records must be kept until age-of-majority + extension.
+    pub fn pediatric(rule: PediatricRetention) -> Self {
+        let mut policy = Self::from_data_class(DataClass::PHI);
+        policy.pediatric = Some(rule);
+        policy
+    }
+
+    /// Attach a pediatric rule to an existing policy. Builder-style
+    /// for the case where you already have a per-class policy and
+    /// want to layer the birthdate-anchored override on top.
+    pub fn with_pediatric(mut self, rule: PediatricRetention) -> Self {
+        self.pediatric = Some(rule);
+        self
     }
 
     /// Places the stream under legal hold.
@@ -248,6 +367,23 @@ impl RetentionEnforcer {
         );
     }
 
+    /// Registers a pediatric per-patient stream. The minimum
+    /// retention end-date is computed from the patient's birthdate
+    /// plus age-of-majority plus extension years (see
+    /// [`PediatricRetention`]). Suitable for per-patient outboard
+    /// streams in clinical-research and pediatric-care wedges.
+    pub fn register_pediatric_stream(&mut self, stream_id: u64, rule: PediatricRetention) {
+        let policy = RetentionPolicy::pediatric(rule);
+        self.streams.insert(
+            stream_id,
+            TrackedStream {
+                created_at: SystemTime::now(),
+                data_class: DataClass::PHI,
+                policy,
+            },
+        );
+    }
+
     /// Places a stream under legal hold.
     pub fn set_legal_hold(&mut self, stream_id: u64, reason: String) -> Result<()> {
         let stream = self
@@ -291,7 +427,27 @@ impl RetentionEnforcer {
             });
         }
 
-        // Check minimum retention
+        // Pediatric rule dominates when present — records must be
+        // retained until age-of-majority + extension years past the
+        // patient's birthdate, regardless of how long the stream
+        // itself has existed. Check this *before* the data-class
+        // min_retention_days so the pediatric horizon wins when it's
+        // the binding constraint.
+        if let Some(rule) = stream.policy.pediatric {
+            let now = SystemTime::now();
+            if !rule.is_expired(now) {
+                let remaining = rule.retain_until().duration_since(now).unwrap_or_default();
+                let elapsed_days =
+                    stream.created_at.elapsed().unwrap_or_default().as_secs() / 86_400;
+                return Err(RetentionError::MinimumRetentionNotMet {
+                    stream_id,
+                    min_days: (remaining.as_secs() / 86_400) as u32,
+                    elapsed_days: elapsed_days as u32,
+                });
+            }
+        }
+
+        // Check minimum retention from data classification.
         if let Some(min_days) = stream.policy.min_retention_days {
             let elapsed = stream.created_at.elapsed().unwrap_or_default();
             let elapsed_days = (elapsed.as_secs() / 86_400) as u32;
@@ -606,7 +762,10 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            RetentionError::MinimumRetentionNotMet { min_days: 2_190, .. }
+            RetentionError::MinimumRetentionNotMet {
+                min_days: 2_190,
+                ..
+            }
         ));
     }
 
@@ -617,5 +776,110 @@ mod tests {
         enforcer.register_audit_log_stream(42, DataClass::Public);
         let policy = enforcer.get_policy(42).unwrap();
         assert_eq!(policy.min_retention_days, Some(HIPAA_AUDIT_LOG_MIN_DAYS));
+    }
+
+    // ------------------------------------------------------------------
+    // Pediatric retention
+    // ------------------------------------------------------------------
+
+    fn years_ago(years: u32) -> SystemTime {
+        let secs = u64::from(years) * 36_524 / 100 * 86_400;
+        SystemTime::now()
+            .checked_sub(Duration::from_secs(secs))
+            .unwrap_or(SystemTime::UNIX_EPOCH)
+    }
+
+    #[test]
+    fn pediatric_default_us_horizon_is_age_24() {
+        let birthdate = years_ago(10); // 10-year-old patient today
+        let rule = PediatricRetention::default_us(birthdate);
+        assert_eq!(rule.age_of_majority_years, 18);
+        assert_eq!(rule.extension_years, 6);
+        let now = SystemTime::now();
+        assert!(
+            !rule.is_expired(now),
+            "10-year-old's record not yet expired"
+        );
+    }
+
+    #[test]
+    fn pediatric_horizon_passes_for_old_birthdate() {
+        let birthdate = years_ago(40); // patient is 40 today
+        let rule = PediatricRetention::default_us(birthdate);
+        assert!(rule.is_expired(SystemTime::now()));
+    }
+
+    #[test]
+    fn age_of_majority_state_overrides() {
+        assert_eq!(age_of_majority_years_for_state("AL"), 19);
+        assert_eq!(age_of_majority_years_for_state("NE"), 19);
+        assert_eq!(age_of_majority_years_for_state("MS"), 21);
+        assert_eq!(age_of_majority_years_for_state("ca"), 18);
+        assert_eq!(age_of_majority_years_for_state("NY"), 18);
+        assert_eq!(age_of_majority_years_for_state("ZZ"), 18);
+    }
+
+    #[test]
+    fn pediatric_policy_blocks_deletion_before_horizon() {
+        let mut enforcer = RetentionEnforcer::new();
+        let birthdate = years_ago(5); // 5-year-old patient
+        let rule = PediatricRetention::for_state(birthdate, "CA");
+        enforcer.register_pediatric_stream(100, rule);
+        let err = enforcer.can_delete(100).unwrap_err();
+        assert!(matches!(err, RetentionError::MinimumRetentionNotMet { .. }));
+    }
+
+    #[test]
+    fn pediatric_policy_permits_deletion_after_horizon() {
+        let mut enforcer = RetentionEnforcer::new();
+        let birthdate = years_ago(40);
+        let rule = PediatricRetention::default_us(birthdate);
+        // Backdate the stream creation so the data-class min is met too.
+        enforcer.register_stream_at(
+            100,
+            DataClass::PHI,
+            SystemTime::now()
+                .checked_sub(Duration::from_secs(7 * 365 * 86_400))
+                .unwrap_or(SystemTime::UNIX_EPOCH),
+        );
+        // Layer the pediatric rule onto the existing tracked stream.
+        let policy = RetentionPolicy::from_data_class(DataClass::PHI).with_pediatric(rule);
+        enforcer.streams.get_mut(&100).unwrap().policy = policy;
+        // Patient is now 40 → pediatric expired → can delete.
+        enforcer
+            .can_delete(100)
+            .expect("deletion allowed past horizon");
+    }
+
+    #[test]
+    fn pediatric_horizon_respects_alabama_age_19() {
+        let birthdate = years_ago(24); // patient is 24 today
+        // Default U.S.: 18 + 6 = 24 → expired (boundary).
+        let default_rule = PediatricRetention::default_us(birthdate);
+        // Alabama: 19 + 6 = 25 → not yet expired.
+        let al_rule = PediatricRetention::for_state(birthdate, "AL");
+        assert!(al_rule.retain_until() > default_rule.retain_until());
+    }
+
+    #[test]
+    fn pediatric_rule_overrides_min_retention_when_longer() {
+        // Newborn: 18+6=24 years of retention horizon — far longer
+        // than the 6-year HIPAA min for PHI. Pediatric must dominate.
+        let mut enforcer = RetentionEnforcer::new();
+        let birthdate = SystemTime::now();
+        let rule = PediatricRetention::default_us(birthdate);
+        let policy = RetentionPolicy::pediatric(rule);
+        enforcer.register_stream_with_policy(7, DataClass::PHI, policy);
+        let err = enforcer.can_delete(7).unwrap_err();
+        match err {
+            RetentionError::MinimumRetentionNotMet { min_days, .. } => {
+                // Roughly 24 years' worth of days.
+                assert!(
+                    min_days > 8000,
+                    "expected ~8700 days of remaining retention, got {min_days}"
+                );
+            }
+            other => panic!("expected MinimumRetentionNotMet, got {other:?}"),
+        }
     }
 }

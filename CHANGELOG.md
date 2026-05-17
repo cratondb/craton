@@ -18,6 +18,94 @@ user-facing narrative.
 _Accretion slot for v0.9.0 work. See [`ROADMAP.md`](./ROADMAP.md)
 for planned scope._
 
+### Added — Healthcare pivot Q3 (de-id, KMS, X12, pediatric retention)
+
+Closes the Q3 chapter of the healthcare-only pivot plan
+(`~/.claude/plans/i-have-decided-to-eventual-fiddle.md`). Q1 (FHIR +
+SMART) and Q2 (HL7v2 + cluster HA) already landed; Q3 adds the
+moat-and-coverage layer that distinguishes Kimberlite from a generic
+verifiable database for clinical / payer / RCM buyers.
+
+- **HIPAA Safe Harbor de-identification** —
+  new `kimberlite_compliance::deidentification` module. Removes
+  the 18 § 164.514(b)(2) identifier classes from a JSON record
+  with a configurable rule table (date → year-only, ZIP → first-3,
+  age → 90+, others → redacted). Returns a
+  `DeidentificationAttestation` carrying SHA-256 pre-/post-image
+  hashes, the set of identifier classes touched, and a stable
+  `transform_version`. New audit-event variant
+  `ComplianceAuditAction::DeidentificationApplied` chains the
+  attestation into the existing audit log so any downstream
+  consumer can prove the dataset they hold is the declared
+  transform of the declared input. 10 unit tests, including all-18
+  enumeration and stable canonical-JSON hashing.
+
+- **External KMS providers (BYOK)** —
+  new `kimberlite_crypto::kms` module. `KmsProvider` trait
+  abstracts AWS KMS / GCP Cloud KMS / Azure Key Vault; opaque
+  `KmsKeyRef` + variable-length `SealedKey` blobs accommodate
+  every cloud's ciphertext shape. `KmsMasterKey` adapter provides
+  `seal_raw` / `open_raw` / `generate_sealed_kek` /
+  `restore_sealed_kek` / `rotate_kek` for the BYOK flow. Ships
+  with a production-quality `InMemoryKms` mock for CI and
+  single-node deployments, plus three doc modules
+  (`aws_kms_integration`, `gcp_kms_integration`,
+  `azure_key_vault_integration`) showing exactly how operators
+  wire each cloud's SDK to the trait. 7 KMS tests covering
+  seal/open round-trip, error paths, and KEK rotation. New
+  `KeyEncryptionKey::from_bytes` / `KeyEncryptionKey::generate` /
+  `KeyEncryptionKey::to_bytes` constructors mirror
+  `EncryptionKey` for the BYOK path.
+
+- **`kimberlite-x12` crate** —
+  ASC X12 EDI parser for HIPAA-mandated healthcare transactions.
+  Envelope-level support for 837 (Professional / Institutional /
+  Dental claims) and 835 (remittance advice) with per-interchange
+  delimiter discovery from the fixed-position ISA header. Typed
+  wrappers `tx837::Claim` and `tx835::Remittance` recognise
+  transactions by implementation-convention reference and expose
+  the call-site primitives ingestion code needs (`claim_headers`,
+  `submitter_batch_id`, `total_paid_amount`, `payment_method`,
+  `claim_payments`). 11 unit tests covering envelope round-trip,
+  segment-count consistency, and rejection of malformed input.
+  Full claim/remittance segment-loop modelling is a v0.11 scope
+  item; v1 ships the ingest-and-audit surface that RCM and payer
+  integrations need.
+
+- **Pediatric extended retention** —
+  `kimberlite_compliance::retention` extends with
+  `PediatricRetention` (birthdate-anchored age-of-majority +
+  extension years), `age_of_majority_years_for_state` lookup
+  (AL/NE=19, MS=21, default 18),
+  `DEFAULT_PEDIATRIC_EXTENSION_YEARS=6`, and
+  `RetentionEnforcer::register_pediatric_stream`. Pediatric rule
+  evaluation runs *before* the data-class minimum so the
+  birthdate-anchored horizon dominates when binding (e.g., a
+  newborn's record retains for ~24y, far longer than the standard
+  6y HIPAA PHI minimum). 6 new retention tests including state
+  override and AL=19 boundary.
+
+- **`examples/rust/src/claims_mini.rs`** —
+  X12 837 → audit-log → 835 reconciliation walkthrough. Parses an
+  inbound claim batch, emits a `DataExported` audit event per
+  claim, parses the matching remittance, and flags claim IDs in
+  the remittance that have no matching intake event. Runs
+  offline — `cargo run --example claims_mini`.
+
+- **`examples/rust/src/research_mini.rs`** —
+  21 CFR Part 11 e-signature + audit-of-audits walkthrough.
+  Investigator signs a clinical case-report form with Ed25519,
+  `RecordSigned` event chains into the trial audit log, a
+  regulator review of the trial audit chain is itself captured
+  as a `DataExported` event in a separate regulator audit
+  stream. Both chains independently `verify_chain`-clean. Runs
+  offline — `cargo run --example research_mini`.
+
+- **Residual strip** — pruned 14 dead
+  `::view-transition-*(tenant-{finance,legal,government,retail,insurance})`
+  selectors from `website/public/css/blocks/tenant-vault.css`,
+  closing the loose end from the Sprint-1 strip.
+
 ### Added — v0.9.x cluster graduation T2.3 (drivers)
 
 - **5 cluster-supervisor VOPR scenarios promoted out of the aspirational

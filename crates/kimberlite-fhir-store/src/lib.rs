@@ -32,7 +32,12 @@
 )]
 #![cfg_attr(
     test,
-    allow(clippy::unwrap_used, clippy::panic, clippy::todo, clippy::unimplemented)
+    allow(
+        clippy::unwrap_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )
 )]
 
 pub mod bundle;
@@ -46,7 +51,7 @@ pub use projection::{
     EncounterProjection, ObservationProjection, OrganizationProjection, PatientProjection,
     PractitionerProjection, Projection,
 };
-pub use streams::{fhir_stream_name, fhir_stream_policy, FhirResourceKind};
+pub use streams::{FhirResourceKind, fhir_stream_name, fhir_stream_policy};
 
 #[cfg(test)]
 mod tests;

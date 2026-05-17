@@ -7,7 +7,7 @@ use kimberlite_fhir::resources::{
 use crate::bundle::BundleIngester;
 use crate::event::FhirAction;
 use crate::projection::{ObservationProjection, PatientProjection, Projection};
-use crate::streams::{fhir_stream_name, fhir_stream_policy, FhirResourceKind};
+use crate::streams::{FhirResourceKind, fhir_stream_name, fhir_stream_policy};
 
 #[test]
 fn end_to_end_clinical_visit_bundle() {

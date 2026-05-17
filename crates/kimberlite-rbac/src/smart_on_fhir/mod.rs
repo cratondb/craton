@@ -34,7 +34,7 @@ pub mod scope;
 pub mod token;
 
 pub use context::{Action, LaunchContext};
-pub use decision::{authorize, ScopeDecision};
+pub use decision::{ScopeDecision, authorize};
 pub use scope::{ResourceFilter, ScopeActions, ScopeContext, SmartScope, SmartScopeSet};
 pub use token::{AccessToken, TokenError, TokenValidator};
 

@@ -1,7 +1,7 @@
 //! Cross-cutting tests — parser ↔ encoder fidelity and MLLP
 //! framing around realistic message shapes.
 
-use crate::adt::{build_ack, AdtA01};
+use crate::adt::{AdtA01, build_ack};
 use crate::encoder::encode;
 use crate::mllp;
 use crate::parser::parse;

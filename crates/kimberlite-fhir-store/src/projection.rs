@@ -80,7 +80,9 @@ impl PatientProjection {
         Some(Self {
             id,
             family_name: first_name.and_then(|n| n.family.clone()),
-            given_names: first_name.map(|n| n.given.join(" ")).filter(|s| !s.is_empty()),
+            given_names: first_name
+                .map(|n| n.given.join(" "))
+                .filter(|s| !s.is_empty()),
             birth_date: p.birth_date.clone(),
             gender: p.gender.map(|g| format!("{g:?}").to_lowercase()),
             primary_identifier: first_identifier.and_then(|i| i.value.clone()),
@@ -123,7 +125,9 @@ impl PractitionerProjection {
         Some(Self {
             id,
             family_name: first_name.and_then(|n| n.family.clone()),
-            given_names: first_name.map(|n| n.given.join(" ")).filter(|s| !s.is_empty()),
+            given_names: first_name
+                .map(|n| n.given.join(" "))
+                .filter(|s| !s.is_empty()),
             npi,
         })
     }
@@ -240,12 +244,8 @@ impl ObservationProjection {
             Some(ObservationValue::Quantity(q)) => (q.value, q.unit.clone(), None),
             Some(ObservationValue::String(s)) => (None, None, Some(s.clone())),
             Some(ObservationValue::CodeableConcept(c)) => (None, None, c.text.clone()),
-            Some(ObservationValue::Boolean(b)) => {
-                (None, None, Some(b.to_string()))
-            }
-            Some(ObservationValue::Integer(i)) => {
-                (Some(*i as f64), None, None)
-            }
+            Some(ObservationValue::Boolean(b)) => (None, None, Some(b.to_string())),
+            Some(ObservationValue::Integer(i)) => (Some(*i as f64), None, None),
             None => (None, None, None),
         };
         Some(Self {
@@ -265,7 +265,9 @@ impl ObservationProjection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kimberlite_fhir::datatypes::{CodeableConcept, Coding, HumanName, Identifier, Quantity, Reference};
+    use kimberlite_fhir::datatypes::{
+        CodeableConcept, Coding, HumanName, Identifier, Quantity, Reference,
+    };
     use kimberlite_fhir::resources::{ObservationStatus, ObservationValue, PatientGender};
 
     #[test]
@@ -392,10 +394,7 @@ mod tests {
             ..Default::default()
         };
         let proj = ObservationProjection::from_resource(&o).unwrap();
-        assert_eq!(
-            proj.value_string.as_deref(),
-            Some("normal sinus rhythm")
-        );
+        assert_eq!(proj.value_string.as_deref(), Some("normal sinus rhythm"));
         assert!(proj.value_numeric.is_none());
     }
 

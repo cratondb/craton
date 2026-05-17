@@ -184,11 +184,7 @@ fn compare_dirs_recursive(a: &Path, b: &Path) {
                 a_path.display(),
                 b_path.display()
             );
-            assert!(
-                a_bytes == b_bytes,
-                "content mismatch on {}",
-                rel.display()
-            );
+            assert!(a_bytes == b_bytes, "content mismatch on {}", rel.display());
         }
     }
 }

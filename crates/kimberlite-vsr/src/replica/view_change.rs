@@ -258,8 +258,7 @@ impl ReplicaState {
         // retransmissions reaching it. A byte-identical retransmission
         // still hashes the same and is rejected.
         let content_hash = do_view_change_content_hash(&dvc);
-        let msg_id =
-            crate::replica::state::MessageId::do_view_change(from, dvc.view, content_hash);
+        let msg_id = crate::replica::state::MessageId::do_view_change(from, dvc.view, content_hash);
         if self.message_dedup_tracker.check_and_record(msg_id).is_err() {
             tracing::warn!(
                 replica = %self.replica_id,
@@ -1121,7 +1120,11 @@ mod tests {
         );
 
         let (leader, _) = leader.on_do_view_change(ReplicaId::new(0), dvc.clone());
-        assert_eq!(leader.do_view_change_msgs.len(), 1, "first DVC should be recorded");
+        assert_eq!(
+            leader.do_view_change_msgs.len(),
+            1,
+            "first DVC should be recorded"
+        );
 
         // Replay the exact same bytes — must hash to the same key and
         // be rejected by the dedup tracker.

@@ -230,6 +230,25 @@ pub enum ComplianceAuditAction {
         accessed_resources: Vec<String>,
         duration_seconds: u64,
     },
+
+    // -- HIPAA Safe Harbor de-identification (45 CFR § 164.514(b)(2)) --
+    /// A record was de-identified under the Safe Harbor method.
+    /// `removed_identifiers` is the comma-separated list of the 18
+    /// HIPAA identifier classes that were touched (rendered for
+    /// human review; the canonical machine form lives in the
+    /// attestation referenced by `attestation_sha256_hex`).
+    /// `original_sha256_hex` / `transformed_sha256_hex` are the
+    /// SHA-256 of the canonical-JSON pre- and post-images, so any
+    /// downstream consumer can prove the dataset they hold is the
+    /// declared transform of the declared input.
+    DeidentificationApplied {
+        record_id: String,
+        removed_identifiers: String,
+        original_sha256_hex: String,
+        transformed_sha256_hex: String,
+        attestation_sha256_hex: String,
+        transform_version: String,
+    },
 }
 
 impl ComplianceAuditAction {
@@ -250,6 +269,7 @@ impl ComplianceAuditAction {
             Self::TokenizationApplied { .. } => "Tokenization",
             Self::RecordSigned { .. } => "RecordSigned",
             Self::BreakGlassActivated { .. } | Self::BreakGlassClosed { .. } => "BreakGlass",
+            Self::DeidentificationApplied { .. } => "Deidentification",
         }
     }
 
@@ -278,6 +298,7 @@ impl ComplianceAuditAction {
             Self::RecordSigned { .. } => "RecordSigned",
             Self::BreakGlassActivated { .. } => "BreakGlassActivated",
             Self::BreakGlassClosed { .. } => "BreakGlassClosed",
+            Self::DeidentificationApplied { .. } => "DeidentificationApplied",
         }
     }
 
@@ -336,6 +357,14 @@ impl ComplianceAuditAction {
                 "closed_at",
                 "accessed_resources",
                 "duration_seconds",
+            ],
+            Self::DeidentificationApplied { .. } => &[
+                "record_id",
+                "removed_identifiers",
+                "original_sha256_hex",
+                "transformed_sha256_hex",
+                "attestation_sha256_hex",
+                "transform_version",
             ],
         };
         names.iter().map(|s| (*s).to_string()).collect()
@@ -396,8 +425,14 @@ impl ComplianceAuditAction {
                 ..
             } => user_id == subject_id || patient_id == subject_id,
 
-            // Actions without subject identifiers
-            Self::FieldMasked { .. } | Self::TokenizationApplied { .. } => false,
+            // Actions without subject identifiers — masking and
+            // tokenization operate on columns rather than subjects,
+            // and de-identification removes subject identity by design
+            // (the record_id is the post-stripping operational handle,
+            // not a GDPR/HIPAA subject identifier).
+            Self::FieldMasked { .. }
+            | Self::TokenizationApplied { .. }
+            | Self::DeidentificationApplied { .. } => false,
         }
     }
 }
@@ -727,7 +762,8 @@ fn subject_id_of(a: &ComplianceAuditAction) -> Option<String> {
         | ComplianceAuditAction::BreachDetected { .. }
         | ComplianceAuditAction::BreachNotified { .. }
         | ComplianceAuditAction::BreachResolved { .. }
-        | ComplianceAuditAction::TokenizationApplied { .. } => None,
+        | ComplianceAuditAction::TokenizationApplied { .. }
+        | ComplianceAuditAction::DeidentificationApplied { .. } => None,
     }
 }
 
@@ -1057,6 +1093,12 @@ impl ComplianceAuditLog {
                 kimberlite_properties::reached!(
                     "compliance.audit.break_glass_closed",
                     "audit log records a BreakGlassClosed event"
+                );
+            }
+            ComplianceAuditAction::DeidentificationApplied { .. } => {
+                kimberlite_properties::reached!(
+                    "compliance.audit.deidentification_applied",
+                    "audit log records a DeidentificationApplied event"
                 );
             }
         }

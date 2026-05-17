@@ -1,0 +1,14 @@
+[package]
+name = "kimberlite-x12"
+description = "X12 EDI parser for HIPAA-mandated healthcare transactions (837 claims, 835 remittance)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true

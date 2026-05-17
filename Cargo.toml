@@ -42,6 +42,7 @@ members = [
     "crates/kimberlite-fhir",
     "crates/kimberlite-fhir-store",
     "crates/kimberlite-hl7v2",
+    "crates/kimberlite-x12",
 ]
 exclude = ["fuzz", "examples/rust"]
 default-members = ["crates/kimberlite"]

@@ -214,7 +214,9 @@ async fn supervisor_restarts_killed_follower() {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
 
-    let pid_after = supervisor.node(1).and_then(kimberlite_cluster::NodeProcess::pid);
+    let pid_after = supervisor
+        .node(1)
+        .and_then(kimberlite_cluster::NodeProcess::pid);
 
     teardown(supervisor).await;
 

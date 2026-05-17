@@ -204,10 +204,7 @@ fn find_subseq(hay: &[u8], needle: &[u8]) -> Option<usize> {
 /// Pre-existing latent bug: small responses (under one TCP packet)
 /// always succeeded so health/ready endpoints worked, but `/metrics`
 /// with its multi-KB Prometheus output reliably tripped the RST.
-fn write_full_response(
-    stream: &mut mio::net::TcpStream,
-    bytes: &[u8],
-) -> std::io::Result<()> {
+fn write_full_response(stream: &mut mio::net::TcpStream, bytes: &[u8]) -> std::io::Result<()> {
     let mut written = 0;
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while written < bytes.len() {

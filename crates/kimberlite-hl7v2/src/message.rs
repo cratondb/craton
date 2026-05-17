@@ -185,10 +185,14 @@ mod tests {
                     repetitions: vec![Repetition {
                         components: vec![
                             Component {
-                                subcomponents: vec![Subcomponent { value: "ADT".into() }],
+                                subcomponents: vec![Subcomponent {
+                                    value: "ADT".into(),
+                                }],
                             },
                             Component {
-                                subcomponents: vec![Subcomponent { value: "A01".into() }],
+                                subcomponents: vec![Subcomponent {
+                                    value: "A01".into(),
+                                }],
                             },
                             Component {
                                 subcomponents: vec![Subcomponent {

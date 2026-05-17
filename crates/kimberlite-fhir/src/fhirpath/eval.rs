@@ -28,7 +28,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use super::ast::{BinOp, Expr, PathSegment};
-use super::parser::{parse, ParseError};
+use super::parser::{ParseError, parse};
 
 /// Errors from evaluating a FHIRPath expression.
 #[derive(Debug, Error)]
@@ -156,11 +156,7 @@ fn flatten_into(v: &Value, out: &mut Vec<Value>) {
     }
 }
 
-fn apply_function(
-    name: &str,
-    args: &[Expr],
-    ctx: &[Value],
-) -> Result<Vec<Value>, FhirPathError> {
+fn apply_function(name: &str, args: &[Expr], ctx: &[Value]) -> Result<Vec<Value>, FhirPathError> {
     match name {
         "where" => {
             if args.len() != 1 {

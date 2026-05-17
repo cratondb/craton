@@ -667,8 +667,7 @@ impl TcpTransport {
                     let registry = state.poll.registry().try_clone()?;
                     if let Some(peer) = state.peers.get_mut(&peer_id) {
                         if is_writable {
-                            let was_connecting =
-                                matches!(peer.state, PeerState::Connecting(_));
+                            let was_connecting = matches!(peer.state, PeerState::Connecting(_));
                             peer.on_writable(&registry)?;
                             // The dialer (us) introduces itself with a
                             // Hello as the very first frame on every
@@ -678,8 +677,8 @@ impl TcpTransport {
                             // else writes between Connecting → Connected
                             // and this hook within the same poll
                             // iteration — so Hello always lands first.
-                            let just_connected = was_connecting
-                                && matches!(peer.state, PeerState::Connected { .. });
+                            let just_connected =
+                                was_connecting && matches!(peer.state, PeerState::Connected { .. });
                             if just_connected {
                                 let hello = Message::broadcast(
                                     local_id,
@@ -1168,30 +1167,21 @@ mod tests {
         let mut bound = None;
         let hash = 0xCAFE_BABE_u64;
 
-        let fate = TcpTransport::route_inbound_frame(
-            &mut bound,
-            hash,
-            hello_msg(ReplicaId::new(2), hash),
-        );
+        let fate =
+            TcpTransport::route_inbound_frame(&mut bound, hash, hello_msg(ReplicaId::new(2), hash));
         assert!(matches!(fate, InboundFate::Consumed));
         assert_eq!(bound, Some(ReplicaId::new(2)));
 
-        let fate = TcpTransport::route_inbound_frame(
-            &mut bound,
-            hash,
-            fake_heartbeat(ReplicaId::new(2)),
-        );
+        let fate =
+            TcpTransport::route_inbound_frame(&mut bound, hash, fake_heartbeat(ReplicaId::new(2)));
         assert!(matches!(fate, InboundFate::Forward(_)));
     }
 
     #[test]
     fn handshake_rejects_first_frame_when_not_hello() {
         let mut bound = None;
-        let fate = TcpTransport::route_inbound_frame(
-            &mut bound,
-            0,
-            fake_heartbeat(ReplicaId::new(1)),
-        );
+        let fate =
+            TcpTransport::route_inbound_frame(&mut bound, 0, fake_heartbeat(ReplicaId::new(1)));
         assert!(matches!(
             fate,
             InboundFate::Reject(InboundRejection::FirstFrameNotHello { .. })
@@ -1234,11 +1224,8 @@ mod tests {
     fn handshake_rejects_post_bind_message_with_spoofed_from() {
         let mut bound = Some(ReplicaId::new(1));
         // Bound to R1 but the heartbeat claims to be from R2.
-        let fate = TcpTransport::route_inbound_frame(
-            &mut bound,
-            0,
-            fake_heartbeat(ReplicaId::new(2)),
-        );
+        let fate =
+            TcpTransport::route_inbound_frame(&mut bound, 0, fake_heartbeat(ReplicaId::new(2)));
         assert!(matches!(
             fate,
             InboundFate::Reject(InboundRejection::FromSpoof { .. })
@@ -1248,11 +1235,8 @@ mod tests {
     #[test]
     fn handshake_rejects_duplicate_hello_after_bind() {
         let mut bound = Some(ReplicaId::new(1));
-        let fate = TcpTransport::route_inbound_frame(
-            &mut bound,
-            0,
-            hello_msg(ReplicaId::new(1), 0),
-        );
+        let fate =
+            TcpTransport::route_inbound_frame(&mut bound, 0, hello_msg(ReplicaId::new(1), 0));
         assert!(matches!(
             fate,
             InboundFate::Reject(InboundRejection::DuplicateHello { .. })

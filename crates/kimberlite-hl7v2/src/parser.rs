@@ -46,16 +46,15 @@ pub fn parse(bytes: &[u8]) -> Result<Message, ParseError> {
 
     // 1. Confirm MSH prefix and read separator declarations.
     if bytes.len() < 3 || &bytes[..3] != b"MSH" {
-        let found = bytes
-            .iter()
-            .take(3)
-            .map(|b| *b as char)
-            .collect::<String>();
+        let found = bytes.iter().take(3).map(|b| *b as char).collect::<String>();
         return Err(ParseError::MissingMsh { found });
     }
-    let field_sep = bytes.get(3).copied().ok_or(ParseError::MalformedMshHeader {
-        got: bytes.len() - 3,
-    })?;
+    let field_sep = bytes
+        .get(3)
+        .copied()
+        .ok_or(ParseError::MalformedMshHeader {
+            got: bytes.len() - 3,
+        })?;
     // MSH-2 occupies the 4 bytes after the field separator.
     if bytes.len() < 8 {
         return Err(ParseError::MalformedMshHeader {
@@ -159,9 +158,7 @@ fn parse_segment(raw: &[u8], encoding: &Encoding) -> Result<Segment, ParseError>
         if after_name.is_empty() {
             return Ok(Segment { name, fields });
         }
-        fields.push(Field::from_text(
-            &String::from_utf8_lossy(&[after_name[0]]),
-        ));
+        fields.push(Field::from_text(&String::from_utf8_lossy(&[after_name[0]])));
         // MSH-2 — the next 4 bytes (component/repetition/escape/subcomp).
         if after_name.len() < 5 {
             return Err(ParseError::MalformedMshHeader {
@@ -182,7 +179,11 @@ fn parse_segment(raw: &[u8], encoding: &Encoding) -> Result<Segment, ParseError>
     } else {
         // Non-MSH: bytes after the name are `<field_sep>field1<field_sep>field2...`.
         if !after_name.is_empty() {
-            let from = if after_name[0] == encoding.field { 1 } else { 0 };
+            let from = if after_name[0] == encoding.field {
+                1
+            } else {
+                0
+            };
             parse_field_list(&after_name[from..], encoding, &mut fields);
         }
     }
@@ -302,10 +303,7 @@ mod tests {
         let f = pid.field(5).unwrap();
         let rep = f.first_rep().unwrap();
         assert_eq!(rep.components.len(), 3);
-        assert_eq!(
-            rep.components[0].first_subcomp_text(),
-            Some("SMITH")
-        );
+        assert_eq!(rep.components[0].first_subcomp_text(), Some("SMITH"));
         assert_eq!(rep.components[1].first_subcomp_text(), Some("ALICE"));
         assert_eq!(rep.components[2].first_subcomp_text(), Some("M"));
     }
@@ -324,7 +322,11 @@ mod tests {
 
     #[test]
     fn lf_only_line_endings_accepted() {
-        let raw = SAMPLE_ADT_A01.iter().copied().map(|b| if b == b'\r' { b'\n' } else { b }).collect::<Vec<u8>>();
+        let raw = SAMPLE_ADT_A01
+            .iter()
+            .copied()
+            .map(|b| if b == b'\r' { b'\n' } else { b })
+            .collect::<Vec<u8>>();
         let msg = parse(&raw).unwrap();
         assert_eq!(msg.segments.len(), 4);
     }

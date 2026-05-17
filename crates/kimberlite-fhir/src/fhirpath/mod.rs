@@ -55,7 +55,7 @@ mod lexer;
 mod parser;
 
 pub use ast::{BinOp, Expr, PathSegment};
-pub use eval::{evaluate, evaluate_ast, FhirPathError};
+pub use eval::{FhirPathError, evaluate, evaluate_ast};
 pub use parser::parse;
 
 #[cfg(test)]

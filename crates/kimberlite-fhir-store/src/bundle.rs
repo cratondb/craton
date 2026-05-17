@@ -39,10 +39,7 @@ pub enum BundleIngestError {
     #[error(
         "bundle entry {index} carries `resourceType=\"{resource_type}\"`, which this adapter does not support"
     )]
-    EntryUnsupportedResource {
-        index: usize,
-        resource_type: String,
-    },
+    EntryUnsupportedResource { index: usize, resource_type: String },
 
     #[error("bundle entry {index} has no `resourceType` field in its resource payload")]
     EntryMissingResourceType { index: usize },
@@ -84,9 +81,7 @@ impl BundleIngester {
     /// targeted error message.
     pub fn events_for(&self, bundle: &Bundle) -> Result<Vec<IngestedEntry>, BundleIngestError> {
         if !matches!(bundle.r#type, BundleType::Transaction | BundleType::Batch) {
-            return Err(BundleIngestError::UnsupportedBundleType {
-                got: bundle.r#type,
-            });
+            return Err(BundleIngestError::UnsupportedBundleType { got: bundle.r#type });
         }
 
         let mut out = Vec::with_capacity(bundle.entry.len());
@@ -134,12 +129,10 @@ impl BundleIngester {
             }
         };
 
-        let event = event_for_kind(kind, action, entry).map_err(|e| {
-            BundleIngestError::Event {
-                index,
-                context: "encode resource",
-                source: e,
-            }
+        let event = event_for_kind(kind, action, entry).map_err(|e| BundleIngestError::Event {
+            index,
+            context: "encode resource",
+            source: e,
         })?;
 
         Ok(IngestedEntry { kind, event })
@@ -270,10 +263,7 @@ mod tests {
     fn put_maps_to_update_and_delete_maps_to_delete() {
         let b = Bundle {
             r#type: BundleType::Transaction,
-            entry: vec![
-                patient_entry("p1", "PUT"),
-                patient_entry("p2", "DELETE"),
-            ],
+            entry: vec![patient_entry("p1", "PUT"), patient_entry("p2", "DELETE")],
             ..Default::default()
         };
         let out = BundleIngester::new().events_for(&b).unwrap();

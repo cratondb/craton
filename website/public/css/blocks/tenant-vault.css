@@ -188,43 +188,18 @@
    ======================================== */
 
 @supports (view-transition-name: none) {
-  /* Smooth morphing transition for all tenant cards */
   ::view-transition-old(tenant-healthcare),
-  ::view-transition-new(tenant-healthcare),
-  ::view-transition-old(tenant-finance),
-  ::view-transition-new(tenant-finance),
-  ::view-transition-old(tenant-legal),
-  ::view-transition-new(tenant-legal),
-  ::view-transition-old(tenant-government),
-  ::view-transition-new(tenant-government),
-  ::view-transition-old(tenant-retail),
-  ::view-transition-new(tenant-retail),
-  ::view-transition-old(tenant-insurance),
-  ::view-transition-new(tenant-insurance) {
-    /* Slower, more visible transition */
+  ::view-transition-new(tenant-healthcare) {
     animation-duration: 0.4s;
     animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-    /* Mix blend for smooth cross-fade during morph */
     mix-blend-mode: normal;
   }
 
-  /* Old state fades out while shrinking */
-  ::view-transition-old(tenant-healthcare),
-  ::view-transition-old(tenant-finance),
-  ::view-transition-old(tenant-legal),
-  ::view-transition-old(tenant-government),
-  ::view-transition-old(tenant-retail),
-  ::view-transition-old(tenant-insurance) {
+  ::view-transition-old(tenant-healthcare) {
     animation-name: vault-morph-out;
   }
 
-  /* New state fades in while expanding */
-  ::view-transition-new(tenant-healthcare),
-  ::view-transition-new(tenant-finance),
-  ::view-transition-new(tenant-legal),
-  ::view-transition-new(tenant-government),
-  ::view-transition-new(tenant-retail),
-  ::view-transition-new(tenant-insurance) {
+  ::view-transition-new(tenant-healthcare) {
     animation-name: vault-morph-in;
   }
 
@@ -250,13 +225,7 @@
     }
   }
 
-  /* Group for the view transition container - allows position interpolation */
-  ::view-transition-group(tenant-healthcare),
-  ::view-transition-group(tenant-finance),
-  ::view-transition-group(tenant-legal),
-  ::view-transition-group(tenant-government),
-  ::view-transition-group(tenant-retail),
-  ::view-transition-group(tenant-insurance) {
+  ::view-transition-group(tenant-healthcare) {
     animation-duration: 0.4s;
     animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   }
@@ -422,17 +391,7 @@
   }
 
   ::view-transition-old(tenant-healthcare),
-  ::view-transition-new(tenant-healthcare),
-  ::view-transition-old(tenant-finance),
-  ::view-transition-new(tenant-finance),
-  ::view-transition-old(tenant-legal),
-  ::view-transition-new(tenant-legal),
-  ::view-transition-old(tenant-government),
-  ::view-transition-new(tenant-government),
-  ::view-transition-old(tenant-retail),
-  ::view-transition-new(tenant-retail),
-  ::view-transition-old(tenant-insurance),
-  ::view-transition-new(tenant-insurance) {
+  ::view-transition-new(tenant-healthcare) {
     animation: none;
   }
 }

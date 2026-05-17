@@ -129,8 +129,8 @@ impl Server {
         // can require VSR bootstrap + Normal status + lag-under-threshold;
         // `/metrics` can refresh the cluster gauges from a fresh
         // `ReplicationStatus` snapshot per scrape.
-        let health_checker = HealthChecker::new(&config.data_dir)
-            .with_submitter(Arc::clone(&submitter));
+        let health_checker =
+            HealthChecker::new(&config.data_dir).with_submitter(Arc::clone(&submitter));
 
         // Install the cluster command router on the underlying
         // `Kimberlite` so that wire-level writes (which go through the
@@ -142,16 +142,13 @@ impl Server {
         // every replicated mode (single-node + cluster); single-node
         // VSR also benefits from durable submit semantics.
         if submitter.is_replicated() {
-            let router = std::sync::Arc::new(crate::replication::ClusterCommandRouter::new(
-                &submitter,
-            ));
+            let router =
+                std::sync::Arc::new(crate::replication::ClusterCommandRouter::new(&submitter));
             submitter
                 .kimberlite()
                 .set_command_router(router)
                 .map_err(|e| {
-                    ServerError::Replication(format!(
-                        "failed to install ClusterCommandRouter: {e}"
-                    ))
+                    ServerError::Replication(format!("failed to install ClusterCommandRouter: {e}"))
                 })?;
             info!(
                 "Server listening on {} with {:?} replication",

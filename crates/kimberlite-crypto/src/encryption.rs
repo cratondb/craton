@@ -687,6 +687,39 @@ impl KeyEncryptionKey {
     // Functional Core (pure, testable)
     // ========================================================================
 
+    /// Constructs a KEK from raw bytes. Used by the KMS integration
+    /// path ([`crate::kms`]) where the KEK round-trips through the
+    /// cloud KMS as a `SealedKey` rather than the local `WrappedKey`
+    /// envelope. Mirrors [`EncryptionKey::from_bytes`].
+    ///
+    /// # Security
+    ///
+    /// Only use bytes from a CSPRNG or from a previously-sealed KEK
+    /// that was just decrypted by a trusted KMS.
+    pub fn from_bytes(bytes: &[u8; KEY_LENGTH]) -> Self {
+        assert!(
+            bytes.iter().any(|&b| b != 0),
+            "KEK bytes are all zeros - corrupted or uninitialized key material"
+        );
+        Self(EncryptionKey::from_bytes(bytes))
+    }
+
+    /// Generates a fresh KEK from the OS CSPRNG. Used by the KMS
+    /// integration when the operator wants a new tenant key that
+    /// will be sealed under their cloud KMS rather than wrapped
+    /// under a local master.
+    pub fn generate() -> Self {
+        Self(EncryptionKey::generate())
+    }
+
+    /// Exposes the 32-byte KEK material. Used by the KMS integration
+    /// to feed the bytes into a cloud `seal` call. Mirrors
+    /// [`EncryptionKey::to_bytes`]; same security caveats apply —
+    /// handle with care, never log, zero after use.
+    pub fn to_bytes(&self) -> [u8; KEY_LENGTH] {
+        self.0.to_bytes()
+    }
+
     /// Creates a KEK from random bytes and wraps it (pure, no IO).
     ///
     /// This is the functional core - it performs no IO and is fully testable.
@@ -1180,6 +1213,14 @@ fn generate_random<const N: usize>() -> [u8; N] {
     let mut bytes = [0u8; N];
     getrandom::fill(&mut bytes).expect("CSPRNG failure");
     bytes
+}
+
+/// Fill a caller-owned buffer with CSPRNG bytes. Exposed for the
+/// [`crate::kms`] module which needs to construct fresh key material
+/// in bytes-first form (so it can be both sealed against an external
+/// KMS *and* passed to `KeyEncryptionKey::from_bytes`).
+pub(crate) fn fill_random(buf: &mut [u8]) {
+    getrandom::fill(buf).expect("CSPRNG failure");
 }
 
 // ============================================================================

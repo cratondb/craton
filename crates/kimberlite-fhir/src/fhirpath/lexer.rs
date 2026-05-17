@@ -168,9 +168,7 @@ pub fn lex(input: &str) -> Result<Vec<Token>, LexError> {
             while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
                 // Stop a number at the second `.` so `1.2.3` parses
                 // as `1.2` then `.` (we don't have decimal chains).
-                if bytes[i] == b'.'
-                    && (i + 1 >= bytes.len() || !bytes[i + 1].is_ascii_digit())
-                {
+                if bytes[i] == b'.' && (i + 1 >= bytes.len() || !bytes[i + 1].is_ascii_digit()) {
                     break;
                 }
                 i += 1;
@@ -188,13 +186,11 @@ pub fn lex(input: &str) -> Result<Vec<Token>, LexError> {
         // Identifier / keyword.
         if b.is_ascii_alphabetic() || b == b'_' {
             let start = i;
-            while i < bytes.len()
-                && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_')
-            {
+            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                 i += 1;
             }
-            let ident = std::str::from_utf8(&bytes[start..i])
-                .map_err(|_| LexError::UnexpectedChar {
+            let ident =
+                std::str::from_utf8(&bytes[start..i]).map_err(|_| LexError::UnexpectedChar {
                     ch: bytes[start] as char,
                     pos: start,
                 })?;
@@ -278,7 +274,14 @@ mod tests {
         let toks = lex(">= <= != < > =").unwrap();
         assert_eq!(
             toks,
-            vec![Token::Ge, Token::Le, Token::Neq, Token::Lt, Token::Gt, Token::Eq,]
+            vec![
+                Token::Ge,
+                Token::Le,
+                Token::Neq,
+                Token::Lt,
+                Token::Gt,
+                Token::Eq,
+            ]
         );
     }
 

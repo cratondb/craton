@@ -293,6 +293,21 @@ fn payload_values(a: &ComplianceAuditAction) -> Vec<String> {
             v.extend(accessed_resources.iter().cloned());
             v
         }
+        ComplianceAuditAction::DeidentificationApplied {
+            record_id,
+            removed_identifiers,
+            original_sha256_hex,
+            transformed_sha256_hex,
+            attestation_sha256_hex,
+            transform_version,
+        } => vec![
+            record_id.clone(),
+            removed_identifiers.clone(),
+            original_sha256_hex.clone(),
+            transformed_sha256_hex.clone(),
+            attestation_sha256_hex.clone(),
+            transform_version.clone(),
+        ],
     }
 }
 

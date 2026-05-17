@@ -209,9 +209,9 @@ mod tests {
     #[test]
     fn to_resource_rejects_wrong_type() {
         let evt = FhirEvent::from_resource(FhirAction::Create, &alice()).unwrap();
-        let err: FhirEventError =
-            evt.to_resource::<kimberlite_fhir::resources::Observation>()
-                .unwrap_err();
+        let err: FhirEventError = evt
+            .to_resource::<kimberlite_fhir::resources::Observation>()
+            .unwrap_err();
         assert!(matches!(
             err,
             FhirEventError::ResourceTypeMismatch { encoded, requested }
@@ -227,7 +227,10 @@ mod tests {
         let err = FhirEvent::decode(&bytes).unwrap_err();
         assert!(matches!(
             err,
-            FhirEventError::VersionMismatch { found: 99, expected: FHIR_EVENT_VERSION }
+            FhirEventError::VersionMismatch {
+                found: 99,
+                expected: FHIR_EVENT_VERSION
+            }
         ));
     }
 }

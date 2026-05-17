@@ -137,12 +137,18 @@ fn first_and_last() {
 
 #[test]
 fn and_or_combination() {
-    let r =
-        evaluate("Patient.active = true and Patient.gender = 'female'", &patient()).unwrap();
+    let r = evaluate(
+        "Patient.active = true and Patient.gender = 'female'",
+        &patient(),
+    )
+    .unwrap();
     assert_eq!(r, vec![json!(true)]);
 
-    let r =
-        evaluate("Patient.gender = 'male' or Patient.gender = 'female'", &patient()).unwrap();
+    let r = evaluate(
+        "Patient.gender = 'male' or Patient.gender = 'female'",
+        &patient(),
+    )
+    .unwrap();
     assert_eq!(r, vec![json!(true)]);
 }
 
@@ -187,10 +193,6 @@ fn comparison_against_empty_is_false_not_error() {
 
 #[test]
 fn telecom_phone_extraction_via_where() {
-    let r = evaluate(
-        "Patient.telecom.where(system = 'phone').value",
-        &patient(),
-    )
-    .unwrap();
+    let r = evaluate("Patient.telecom.where(system = 'phone').value", &patient()).unwrap();
     assert_eq!(r, vec![json!("555-1234")]);
 }

@@ -623,7 +623,10 @@ impl CommandSubmitter {
                         .and_then(|r| r.config().replicas().next().map(|id| id.as_u8())),
                     commit_number: snapshot.as_ref().map(|s| s.commit_number.as_u64()),
                     view: snapshot.as_ref().map(|s| s.view.as_u64()),
-                    leader_id: snapshot.as_ref().and_then(|s| s.leader_id).map(|id| id.as_u8()),
+                    leader_id: snapshot
+                        .as_ref()
+                        .and_then(|s| s.leader_id)
+                        .map(|id| id.as_u8()),
                     connected_peers: repl.as_ref().map(|r| {
                         // Get connected peers from the shared state
                         let state = r.cluster_config();

@@ -15,9 +15,7 @@ pub mod supervisor;
 #[doc(hidden)]
 pub mod testing;
 
-pub use backup::{
-    BackupEntry, BackupSummary, RestoreSummary, backup_cluster, restore_cluster,
-};
+pub use backup::{BackupEntry, BackupSummary, RestoreSummary, backup_cluster, restore_cluster};
 pub use config::{ClusterConfig, ClusterTopology, HTTP_PORT_OFFSET, NodeConfig, VSR_PORT_OFFSET};
 pub use error::{Error, Result};
 pub use node::{NodeProcess, NodeStatus};
@@ -87,10 +85,7 @@ pub async fn start_cluster(data_dir: PathBuf) -> Result<ClusterSupervisor> {
 /// Returns [`Error::NotInitialized`] if `cluster.toml` is missing,
 /// [`Error::DuplicateEndpoint`] if validation rejects the loaded config,
 /// or [`Error::NodeIdOutOfRange`] if `node_id` is not in `cluster.toml`.
-pub async fn start_cluster_node(
-    data_dir: PathBuf,
-    node_id: usize,
-) -> Result<ClusterSupervisor> {
+pub async fn start_cluster_node(data_dir: PathBuf, node_id: usize) -> Result<ClusterSupervisor> {
     let config = ClusterConfig::load(&data_dir)?;
     let mut supervisor = ClusterSupervisor::for_node(config, node_id)?;
     supervisor.start_all().await?;

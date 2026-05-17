@@ -20,7 +20,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use super::ast::{BinOp, Expr, PathSegment};
-use super::lexer::{lex, LexError, Token};
+use super::lexer::{LexError, Token, lex};
 
 #[derive(Debug, Error, PartialEq)]
 pub enum ParseError {
@@ -43,10 +43,7 @@ pub enum ParseError {
 /// Parse a FHIRPath expression source into an [`Expr`] AST.
 pub fn parse(input: &str) -> Result<Expr, ParseError> {
     let tokens = lex(input)?;
-    let mut p = Parser {
-        tokens,
-        pos: 0,
-    };
+    let mut p = Parser { tokens, pos: 0 };
     let expr = p.parse_expr()?;
     if p.pos < p.tokens.len() {
         return Err(ParseError::Unsupported(format!(
@@ -75,7 +72,11 @@ impl Parser {
         t
     }
 
-    fn expect(&mut self, expected: &'static str, predicate: impl Fn(&Token) -> bool) -> Result<Token, ParseError> {
+    fn expect(
+        &mut self,
+        expected: &'static str,
+        predicate: impl Fn(&Token) -> bool,
+    ) -> Result<Token, ParseError> {
         match self.peek() {
             Some(t) if predicate(t) => {
                 let t = t.clone();
@@ -210,7 +211,9 @@ impl Parser {
                 Some(Token::Dot) => {
                     self.bump();
                     let ident = self.expect("identifier", |t| matches!(t, Token::Ident(_)))?;
-                    let Token::Ident(name) = ident else { unreachable!() };
+                    let Token::Ident(name) = ident else {
+                        unreachable!()
+                    };
                     if matches!(self.peek(), Some(Token::LParen)) {
                         self.bump();
                         let args = self.parse_args()?;
@@ -222,11 +225,14 @@ impl Parser {
                 }
                 Some(Token::LBracket) => {
                     self.bump();
-                    let idx_tok = self.expect("integer index", |t| matches!(t, Token::NumberLit(_)))?;
-                    let Token::NumberLit(s) = idx_tok else { unreachable!() };
-                    let idx: usize = s.parse().map_err(|_| {
-                        ParseError::Unsupported(format!("non-integer index `{s}`"))
-                    })?;
+                    let idx_tok =
+                        self.expect("integer index", |t| matches!(t, Token::NumberLit(_)))?;
+                    let Token::NumberLit(s) = idx_tok else {
+                        unreachable!()
+                    };
+                    let idx: usize = s
+                        .parse()
+                        .map_err(|_| ParseError::Unsupported(format!("non-integer index `{s}`")))?;
                     self.expect("]", |t| matches!(t, Token::RBracket))?;
                     segments.push(PathSegment::Index(idx));
                 }
@@ -282,7 +288,9 @@ mod tests {
     #[test]
     fn where_predicate() {
         let e = parse("name.where(use = 'official').family").unwrap();
-        let Expr::Path(segs) = e else { panic!("expected path") };
+        let Expr::Path(segs) = e else {
+            panic!("expected path")
+        };
         assert_eq!(segs.len(), 3);
         assert!(matches!(&segs[0], PathSegment::Member(n) if n == "name"));
         assert!(matches!(

@@ -151,7 +151,6 @@ fn create_stream_via_leader(
     Err(last_err)
 }
 
-
 // ===========================================================================
 // Scenario 1: cluster remains writable through follower crash + restart
 // ===========================================================================
@@ -180,9 +179,7 @@ async fn cluster_remains_writable_through_follower_crash() {
     // VSR-committing operation we can issue without threading
     // expected_offset through a possibly-divergent stream history —
     // each successful create proves a quorum committed.
-    if let Err(e) =
-        create_stream_via_leader(base_port, "pre-kill", Duration::from_secs(15))
-    {
+    if let Err(e) = create_stream_via_leader(base_port, "pre-kill", Duration::from_secs(15)) {
         teardown(supervisor).await;
         panic!("pre-kill create_stream failed: {e}");
     }
@@ -204,9 +201,7 @@ async fn cluster_remains_writable_through_follower_crash() {
 
     // Writability probe during follower-down. Quorum on a 3-node
     // cluster is 2 (leader + remaining follower), so writes commit.
-    if let Err(e) =
-        create_stream_via_leader(base_port, "during-down", Duration::from_secs(15))
-    {
+    if let Err(e) = create_stream_via_leader(base_port, "during-down", Duration::from_secs(15)) {
         teardown(supervisor).await;
         panic!("create_stream during follower-down failed: {e}");
     }
@@ -238,9 +233,7 @@ async fn cluster_remains_writable_through_follower_crash() {
     }
 
     // Writability probe post-restart. Cluster is back to full mesh.
-    if let Err(e) =
-        create_stream_via_leader(base_port, "post-restart", Duration::from_secs(15))
-    {
+    if let Err(e) = create_stream_via_leader(base_port, "post-restart", Duration::from_secs(15)) {
         teardown(supervisor).await;
         panic!("post-restart create_stream failed: {e}");
     }
@@ -278,8 +271,7 @@ async fn leader_kill_elects_new_leader_and_old_leader_rejoins() {
     };
 
     // Writability probe pre-kill via the original leader.
-    if let Err(e) =
-        create_stream_via_leader(base_port, "leader-kill-pre", Duration::from_secs(15))
+    if let Err(e) = create_stream_via_leader(base_port, "leader-kill-pre", Duration::from_secs(15))
     {
         teardown(supervisor).await;
         panic!("pre-kill create_stream failed: {e}");
@@ -309,9 +301,7 @@ async fn leader_kill_elects_new_leader_and_old_leader_rejoins() {
         }
         None => {
             teardown(supervisor).await;
-            panic!(
-                "no new leader emerged within {new_leader_deadline:?} after killing r{leader}"
-            );
+            panic!("no new leader emerged within {new_leader_deadline:?} after killing r{leader}");
         }
     };
 
@@ -319,8 +309,7 @@ async fn leader_kill_elects_new_leader_and_old_leader_rejoins() {
     // creating a fresh stream. Don't reuse the pre-kill stream — its
     // expected_offset bookkeeping after a leader transition is fragile
     // and not what this scenario is testing.
-    if let Err(e) =
-        create_stream_via_leader(base_port, "leader-kill-post", Duration::from_secs(15))
+    if let Err(e) = create_stream_via_leader(base_port, "leader-kill-post", Duration::from_secs(15))
     {
         teardown(supervisor).await;
         panic!("write through new leader r{new_leader} failed: {e}");
@@ -414,12 +403,7 @@ async fn leader_kill_flips_follower_readyz_within_5s() {
     // Concretely: the cluster has up to ~1s view-change timeout +
     // election round-trips, then the follower sees the new view and
     // its lag bookkeeping settles. 10s is a comfortable budget.
-    let readyz_after = match poll_http(
-        &follower_http,
-        "/readyz",
-        200,
-        Duration::from_secs(10),
-    ) {
+    let readyz_after = match poll_http(&follower_http, "/readyz", 200, Duration::from_secs(10)) {
         Ok(r) => r,
         Err(r) => {
             teardown(supervisor).await;
@@ -482,13 +466,18 @@ async fn single_node_restart_preserves_writes() {
     // the leader-kill scenario is covered by a separate test, and
     // cleanly isolating restart-survives-write here makes the
     // failure mode unambiguous if the assertion below ever fires.
-    let target: usize = (0..3).find(|r| *r != leader as usize).expect("a follower exists");
+    let target: usize = (0..3)
+        .find(|r| *r != leader as usize)
+        .expect("a follower exists");
 
     // Pre-restart: create a baseline stream so the restart has a
     // committed VSR op to preserve.
-    let (_, baseline_stream_id) =
-        create_stream_via_leader(base_port, "single-restart-baseline", Duration::from_secs(15))
-            .unwrap_or_else(|e| panic!("baseline create_stream failed: {e}"));
+    let (_, baseline_stream_id) = create_stream_via_leader(
+        base_port,
+        "single-restart-baseline",
+        Duration::from_secs(15),
+    )
+    .unwrap_or_else(|e| panic!("baseline create_stream failed: {e}"));
 
     // Stop, restart, settle.
     if let Err(e) = supervisor.stop_node(target).await {
@@ -524,9 +513,7 @@ async fn single_node_restart_preserves_writes() {
         };
         if let Err(e) = client.read_events(baseline_stream_id, Offset::new(0), 65_536) {
             teardown(supervisor).await;
-            panic!(
-                "replica r{replica} can't see baseline stream after restart: {e}"
-            );
+            panic!("replica r{replica} can't see baseline stream after restart: {e}");
         }
     }
 

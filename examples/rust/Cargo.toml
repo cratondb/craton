@@ -10,6 +10,9 @@ kimberlite-types = { path = "../../crates/kimberlite-types" }
 kimberlite-fhir = { path = "../../crates/kimberlite-fhir" }
 kimberlite-fhir-store = { path = "../../crates/kimberlite-fhir-store" }
 kimberlite-hl7v2 = { path = "../../crates/kimberlite-hl7v2" }
+kimberlite-x12 = { path = "../../crates/kimberlite-x12" }
+kimberlite-crypto = { path = "../../crates/kimberlite-crypto" }
+kimberlite-compliance = { path = "../../crates/kimberlite-compliance" }
 kimberlite-rbac = { path = "../../crates/kimberlite-rbac" }
 anyhow = "1"
 serde_json = "1"
@@ -67,3 +70,11 @@ path = "src/smart_on_fhir_app.rs"
 [[example]]
 name = "hl7v2_feed"
 path = "src/hl7v2_feed.rs"
+
+[[example]]
+name = "claims_mini"
+path = "src/claims_mini.rs"
+
+[[example]]
+name = "research_mini"
+path = "src/research_mini.rs"

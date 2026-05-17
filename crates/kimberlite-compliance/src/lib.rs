@@ -40,6 +40,7 @@ pub mod breach;
 pub mod certificate;
 pub mod classification;
 pub mod consent;
+pub mod deidentification;
 pub mod erasure;
 pub mod export;
 pub mod purpose;

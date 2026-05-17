@@ -42,7 +42,12 @@
 )]
 #![cfg_attr(
     test,
-    allow(clippy::unwrap_used, clippy::panic, clippy::todo, clippy::unimplemented)
+    allow(
+        clippy::unwrap_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )
 )]
 
 pub mod adt;
@@ -53,11 +58,14 @@ pub mod mllp;
 pub mod parser;
 
 pub use adt::{AdtA01, AdtError};
-pub use encoder::{encode, EncodeError};
-pub use encoding::{Encoding, DEFAULT_COMPONENT_SEP, DEFAULT_FIELD_SEP, DEFAULT_REPETITION_SEP, DEFAULT_SUBCOMPONENT_SEP, DEFAULT_ESCAPE_CHAR};
+pub use encoder::{EncodeError, encode};
+pub use encoding::{
+    DEFAULT_COMPONENT_SEP, DEFAULT_ESCAPE_CHAR, DEFAULT_FIELD_SEP, DEFAULT_REPETITION_SEP,
+    DEFAULT_SUBCOMPONENT_SEP, Encoding,
+};
 pub use message::{Component, Field, Message, Segment, Subcomponent};
-pub use mllp::{MllpError, MLLP_END_BLOCK, MLLP_LAST_BYTE, MLLP_START_BLOCK};
-pub use parser::{parse, ParseError};
+pub use mllp::{MLLP_END_BLOCK, MLLP_LAST_BYTE, MLLP_START_BLOCK, MllpError};
+pub use parser::{ParseError, parse};
 
 #[cfg(test)]
 mod tests;

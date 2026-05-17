@@ -749,10 +749,7 @@ impl<S: Read + Write + Seek> EventLoop<S> {
         // Send all non-PrepareOk messages immediately (heartbeats, commits, etc.)
         for msg in immediate {
             if msg.is_broadcast() {
-                let others: Vec<_> = self
-                    .cluster_config
-                    .others(local_id)
-                    .collect();
+                let others: Vec<_> = self.cluster_config.others(local_id).collect();
                 for peer in others {
                     self.transport.send(peer, msg.clone());
                 }
@@ -1077,7 +1074,6 @@ impl<S: Read + Write + Seek> EventLoop<S> {
             state.bootstrap_complete = true;
         }
     }
-
 }
 
 // ============================================================================

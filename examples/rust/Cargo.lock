@@ -1871,11 +1871,14 @@ dependencies = [
  "http-body-util",
  "jsonwebtoken",
  "kimberlite-client",
+ "kimberlite-compliance",
+ "kimberlite-crypto",
  "kimberlite-fhir",
  "kimberlite-fhir-store",
  "kimberlite-hl7v2",
  "kimberlite-rbac",
  "kimberlite-types",
+ "kimberlite-x12",
  "serde",
  "serde_json",
  "sha2",
@@ -1957,6 +1960,14 @@ dependencies = [
  "kimberlite-crypto",
  "kimberlite-types",
  "postcard",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "kimberlite-x12"
+version = "0.8.0"
+dependencies = [
  "serde",
  "thiserror",
 ]

@@ -428,7 +428,10 @@ mod tests {
             Purpose::PublicHealth,
             Purpose::Emergency,
         ] {
-            assert!(p.is_valid_for(DataClass::PHI), "{p:?} must be valid for PHI");
+            assert!(
+                p.is_valid_for(DataClass::PHI),
+                "{p:?} must be valid for PHI"
+            );
             assert!(p.is_healthcare());
         }
     }

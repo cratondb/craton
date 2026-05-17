@@ -17,7 +17,9 @@
 
 use kimberlite_compliance::retention::RetentionPolicy;
 use kimberlite_fhir::resource::FhirResource;
-use kimberlite_fhir::resources::{Bundle, Encounter, Observation, Organization, Patient, Practitioner};
+use kimberlite_fhir::resources::{
+    Bundle, Encounter, Observation, Organization, Patient, Practitioner,
+};
 use kimberlite_types::DataClass;
 
 /// The set of FHIR resource kinds this storage adapter supports.
@@ -135,7 +137,10 @@ mod tests {
 
     #[test]
     fn unknown_resource_type_returns_none() {
-        assert_eq!(FhirResourceKind::from_resource_type("DiagnosticReport"), None);
+        assert_eq!(
+            FhirResourceKind::from_resource_type("DiagnosticReport"),
+            None
+        );
         assert_eq!(FhirResourceKind::from_resource_type(""), None);
     }
 

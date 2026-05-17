@@ -108,17 +108,17 @@ mod tests {
     fn nested_objects_canonicalise_recursively() {
         let v = json!({ "outer": { "z": 1, "a": 2 }, "alpha": [{"b": 1, "a": 2}] });
         let bytes = to_canonical_json(&v).unwrap();
-        assert_eq!(
-            bytes,
-            br#"{"alpha":[{"a":2,"b":1}],"outer":{"a":2,"z":1}}"#
-        );
+        assert_eq!(bytes, br#"{"alpha":[{"a":2,"b":1}],"outer":{"a":2,"z":1}}"#);
     }
 
     #[test]
     fn determinism_across_unsorted_inputs() {
         let a = json!({ "b": 1, "a": 2 });
         let b = json!({ "a": 2, "b": 1 });
-        assert_eq!(to_canonical_json(&a).unwrap(), to_canonical_json(&b).unwrap());
+        assert_eq!(
+            to_canonical_json(&a).unwrap(),
+            to_canonical_json(&b).unwrap()
+        );
     }
 
     #[test]

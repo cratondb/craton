@@ -96,7 +96,8 @@ mod tests {
         let msg = parse(SAMPLE_ADT_A01).unwrap();
         let encoded = encode(&msg).unwrap();
         assert_eq!(
-            encoded, SAMPLE_ADT_A01,
+            encoded,
+            SAMPLE_ADT_A01,
             "round-trip mismatch:\nwant: {:?}\n got: {:?}",
             String::from_utf8_lossy(SAMPLE_ADT_A01),
             String::from_utf8_lossy(&encoded)

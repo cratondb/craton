@@ -3,7 +3,7 @@
 //! contract the example app and the SDK will both lean on.
 
 use super::context::{Action, LaunchContext};
-use super::decision::{authorize, ScopeDecision};
+use super::decision::{ScopeDecision, authorize};
 use super::scope::SmartScopeSet;
 
 fn ctx_with_patient(id: &str) -> LaunchContext {
@@ -30,7 +30,12 @@ fn patient_scope_with_context_allows_with_constraint() {
 #[test]
 fn patient_scope_without_context_is_misconfigured_launch() {
     let scopes = SmartScopeSet::parse("patient/Observation.read").unwrap();
-    let dec = authorize(&scopes, &LaunchContext::empty(), "Observation", Action::Read);
+    let dec = authorize(
+        &scopes,
+        &LaunchContext::empty(),
+        "Observation",
+        Action::Read,
+    );
     assert_eq!(dec, ScopeDecision::MissingPatientContext);
 }
 
@@ -92,11 +97,21 @@ fn wildcard_resource_matches_any_type() {
 fn star_action_grants_read_and_write() {
     let scopes = SmartScopeSet::parse("user/Observation.*").unwrap();
     assert_eq!(
-        authorize(&scopes, &LaunchContext::empty(), "Observation", Action::Read),
+        authorize(
+            &scopes,
+            &LaunchContext::empty(),
+            "Observation",
+            Action::Read
+        ),
         ScopeDecision::Allow
     );
     assert_eq!(
-        authorize(&scopes, &LaunchContext::empty(), "Observation", Action::Write),
+        authorize(
+            &scopes,
+            &LaunchContext::empty(),
+            "Observation",
+            Action::Write
+        ),
         ScopeDecision::Allow
     );
 }
@@ -104,7 +119,12 @@ fn star_action_grants_read_and_write() {
 #[test]
 fn system_scope_works_without_launch_context() {
     let scopes = SmartScopeSet::parse("system/*.read").unwrap();
-    let dec = authorize(&scopes, &LaunchContext::empty(), "Observation", Action::Read);
+    let dec = authorize(
+        &scopes,
+        &LaunchContext::empty(),
+        "Observation",
+        Action::Read,
+    );
     assert_eq!(dec, ScopeDecision::Allow);
 }
 

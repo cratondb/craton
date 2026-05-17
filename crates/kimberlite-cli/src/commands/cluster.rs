@@ -109,11 +109,7 @@ pub async fn start(node_id: Option<u32>, project: &str) -> Result<()> {
 
     let mut supervisor = match node_id {
         Some(id) => {
-            println!(
-                "Starting node {} only in {}...",
-                id,
-                project.code()
-            );
+            println!("Starting node {} only in {}...", id, project.code());
             start_cluster_node(project_path.to_path_buf(), id as usize)
                 .await
                 .with_context(|| "Failed to start cluster node")?
@@ -257,15 +253,11 @@ pub fn backup(project: &str, output: &str) -> Result<()> {
     let project_path = Path::new(project);
     let output_path = Path::new(output);
 
-    println!(
-        "Backing up cluster {} → {}",
-        project.code(),
-        output.code()
-    );
+    println!("Backing up cluster {} → {}", project.code(), output.code());
 
     let spinner = create_spinner("Creating archive...");
-    let summary = backup_cluster(project_path, output_path)
-        .with_context(|| "Failed to back up cluster")?;
+    let summary =
+        backup_cluster(project_path, output_path).with_context(|| "Failed to back up cluster")?;
     finish_success(
         &spinner,
         &format!(
@@ -277,7 +269,10 @@ pub fn backup(project: &str, output: &str) -> Result<()> {
     );
 
     println!();
-    println!("Archive: {}", summary.archive_path.display().to_string().code());
+    println!(
+        "Archive: {}",
+        summary.archive_path.display().to_string().code()
+    );
     println!("Files:   {}", summary.file_count);
     println!(
         "Size:    {} bytes uncompressed, {} bytes on disk",
@@ -297,15 +292,11 @@ pub fn restore(input: &str, target: &str) -> Result<()> {
     let input_path = Path::new(input);
     let target_path = Path::new(target);
 
-    println!(
-        "Restoring backup {} → {}",
-        input.code(),
-        target.code()
-    );
+    println!("Restoring backup {} → {}", input.code(), target.code());
 
     let spinner = create_spinner("Extracting and verifying...");
-    let summary = restore_cluster(input_path, target_path)
-        .with_context(|| "Failed to restore cluster")?;
+    let summary =
+        restore_cluster(input_path, target_path).with_context(|| "Failed to restore cluster")?;
     finish_success(
         &spinner,
         &format!("Restore complete ({} files)", summary.file_count),

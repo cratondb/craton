@@ -52,6 +52,56 @@ Stretch goal: published performance baselines on reference hardware
 so the `compare/postgresql` page and the README's trade-off table
 quote real numbers instead of qualitative language.
 
+### Healthcare pivot — landed in the v0.9.0 cycle
+
+The healthcare-only repositioning ("Kimberlite is a verifiable
+database for healthcare") drove a large body of work that has
+already merged on main, ahead of the v0.9.0 cut:
+
+- ✅ **Sprint 1 — strip.** Finance / legal examples deleted; README,
+  ROADMAP, docs, examples README, blog posts, and website templates
+  rewritten around the clinical/EHR-adjacent wedge. Studio
+  playground collapsed to a single healthcare tenant. Residual
+  `tenant-{finance,legal,government,retail,insurance}` CSS selectors
+  pruned. (commits `eb5a57f`, plus this cycle's CSS sweep)
+- ✅ **Sprint 2 — healthcare-first defaults.** New streams default
+  to `DataClass::PHI`, audit-on, retention=6y, encryption-required.
+  Purpose-of-use enum extended with HIPAA TPO + `Research`,
+  `PublicHealth`, `Emergency`. `BreakGlassActivated` /
+  `BreakGlassClosed` audit events with mandatory justification.
+  Audit-log retention promoted to a distinct policy class
+  (HIPAA §164.530(j)(2)). (commit `4b8590e`)
+- ✅ **Q1 — FHIR + SMART on FHIR.** `kimberlite-fhir` crate (R4
+  typed resources, canonical JSON, FHIRPath subset),
+  `kimberlite-fhir-store` (FHIR ↔ Kimberlite event + projection
+  adapter), `kimberlite-rbac` SMART scope parsing + `authorize()`
+  + JWT validation. `examples/ehr_mini` + `examples/smart_on_fhir_app`
+  shipped, plus the "FHIR-native, verifiable" blog post.
+  (commits `fa782d0`, `08bc9ab`, `dc828c2`, `1379af2`)
+- ✅ **Q2 — HL7v2 + cluster HA graduation.** `kimberlite-hl7v2`
+  crate (parser, encoder, MLLP framing, typed ADT^A01) +
+  `examples/hl7v2_feed`. Clinical + cluster VOPR scenarios
+  promoted out of aspirational. `kimberlite-cluster` graduated from
+  "not ready for public use" through the T1 → T3 punch list (real
+  subprocess spawn, multi-host topology, /healthz + /readyz + /metrics,
+  backup/restore, 3-node integration tests, ops runbook, perf
+  baseline harness with measured RTO/RPO, systemd + docker-compose
+  deployment references). (commits `e45ebe6`, `4a7237e`, `6c878a8`,
+  `f1fd8df` … `19e1e5e`, `2993ff6`, `53e504b`)
+
+- ✅ **Q3 — moat layer.** HIPAA Safe Harbor de-identification
+  (new `kimberlite_compliance::deidentification` module +
+  `DeidentificationApplied` audit event), external KMS providers
+  for BYOK (new `kimberlite_crypto::kms` module — `KmsProvider`
+  trait + AWS/GCP/Azure integration docs + in-memory mock +
+  KEK rotation flow), `kimberlite-x12` crate (837P/I/D + 835
+  envelope + typed wrappers), pediatric birthdate-anchored
+  retention (`PediatricRetention` + per-state age-of-majority
+  override), and the `claims_mini` + `research_mini` examples
+  (X12 ingest + 21 CFR Part 11 e-signature). All Q3 items
+  green-on-clippy `-D warnings`; full CHANGELOG entry under
+  Unreleased.
+
 - [ ] **Go SDK — Phase 1.** `Connect`/`Query`/`Append`/`Read`/
       `Subscribe`/`Pool` over the existing FFI bridge. Scaffolding
       lives at `sdks/go/`; v0.7.0 + v0.8.0 deferred this so TS /

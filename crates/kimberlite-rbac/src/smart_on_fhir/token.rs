@@ -151,7 +151,7 @@ impl TokenValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jsonwebtoken::{encode, EncodingKey, Header};
+    use jsonwebtoken::{EncodingKey, Header, encode};
 
     fn encode_hs256(claims: &serde_json::Value, secret: &[u8]) -> String {
         encode(

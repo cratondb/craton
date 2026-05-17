@@ -195,8 +195,9 @@ impl ClusterConfig {
                 (node.port.saturating_add(VSR_PORT_OFFSET), "vsr"),
                 (node.port.saturating_add(HTTP_PORT_OFFSET), "http"),
             ] {
-                if let Some((_, _, first)) =
-                    seen.iter().find(|(h, p, _)| h == &node.bind_address && *p == label_port)
+                if let Some((_, _, first)) = seen
+                    .iter()
+                    .find(|(h, p, _)| h == &node.bind_address && *p == label_port)
                 {
                     return Err(Error::DuplicateEndpoint {
                         host: node.bind_address.clone(),
@@ -421,7 +422,9 @@ mod tests {
             5432,
         )
         .unwrap();
-        config.validate().expect("baseline config is collision-free");
+        config
+            .validate()
+            .expect("baseline config is collision-free");
 
         config.topology.nodes[1].port = config.topology.nodes[0].port + VSR_PORT_OFFSET;
         match config.validate().unwrap_err() {
@@ -439,12 +442,9 @@ mod tests {
         // HTTP port for node 0 = base + HTTP_PORT_OFFSET. Pick a base that
         // overflows even the smallest derived port.
         let hosts = ["10.0.1.5"];
-        let err = ClusterConfig::try_new_with_hosts(
-            temp.path().to_path_buf(),
-            &hosts,
-            u16::MAX - 100,
-        )
-        .unwrap_err();
+        let err =
+            ClusterConfig::try_new_with_hosts(temp.path().to_path_buf(), &hosts, u16::MAX - 100)
+                .unwrap_err();
         assert!(matches!(err, Error::InvalidPortRange(_, _)), "got {err:?}");
     }
 }

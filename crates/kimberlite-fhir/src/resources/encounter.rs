@@ -51,10 +51,7 @@ pub struct Encounter {
     #[serde(default, skip_serializing_if = "Vec::is_empty", rename = "reasonCode")]
     pub reason_code: Vec<CodeableConcept>,
 
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        rename = "serviceProvider"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "serviceProvider")]
     pub service_provider: Option<Reference>,
 
     #[serde(flatten)]

@@ -31,7 +31,9 @@ pub enum ScopeParseError {
     #[error("scope `{scope}` has unrecognised action — expected `read`, `write`, or `*`")]
     UnknownAction { scope: String },
 
-    #[error("scope `{0}` is malformed — expected `<context>/<resource>.<action>` or a well-known identifier")]
+    #[error(
+        "scope `{0}` is malformed — expected `<context>/<resource>.<action>` or a well-known identifier"
+    )]
     Malformed(String),
 }
 
@@ -149,12 +151,12 @@ impl SmartScope {
         }
 
         // Resource scope: <context>/<resource>.<action>
-        let (context_part, rest) = s.split_once('/').ok_or_else(|| {
-            ScopeParseError::Malformed(s.to_string())
-        })?;
-        let (resource_part, action_part) = rest.split_once('.').ok_or_else(|| {
-            ScopeParseError::Malformed(s.to_string())
-        })?;
+        let (context_part, rest) = s
+            .split_once('/')
+            .ok_or_else(|| ScopeParseError::Malformed(s.to_string()))?;
+        let (resource_part, action_part) = rest
+            .split_once('.')
+            .ok_or_else(|| ScopeParseError::Malformed(s.to_string()))?;
 
         let context = match context_part {
             "patient" => ScopeContext::Patient,
@@ -163,7 +165,7 @@ impl SmartScope {
             _ => {
                 return Err(ScopeParseError::UnknownContext {
                     scope: s.to_string(),
-                })
+                });
             }
         };
 
@@ -182,7 +184,7 @@ impl SmartScope {
             _ => {
                 return Err(ScopeParseError::UnknownAction {
                     scope: s.to_string(),
-                })
+                });
             }
         };
 

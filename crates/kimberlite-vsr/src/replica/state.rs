@@ -1873,9 +1873,8 @@ mod tests {
         // once we restore Normal status (e.g. after `StartView` lands),
         // the strict predicate flips true on the view-table leader.
         let config = test_config_3();
-        let mut r1 = ReplicaState::new(ReplicaId::new(1), config).transition_to_view(
-            ViewNumber::new(1),
-        );
+        let mut r1 =
+            ReplicaState::new(ReplicaId::new(1), config).transition_to_view(ViewNumber::new(1));
         // Hand-restore Normal — the real protocol path runs through
         // start_view machinery, but the predicate only reads `status`.
         r1.status = ReplicaStatus::Normal;

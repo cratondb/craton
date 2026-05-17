@@ -232,7 +232,8 @@ mod tests {
 
     #[test]
     fn rejects_non_adt_message() {
-        let raw = b"MSH|^~\\&|S|F|R|RF|20260315||ORU^R01|M1|P|2.5\rPID|1||X||SMITH^ALICE\rPV1|1|O|||\r";
+        let raw =
+            b"MSH|^~\\&|S|F|R|RF|20260315||ORU^R01|M1|P|2.5\rPID|1||X||SMITH^ALICE\rPV1|1|O|||\r";
         let msg = parse(raw).unwrap();
         let err = AdtA01::from_message(&msg).unwrap_err();
         assert!(matches!(
