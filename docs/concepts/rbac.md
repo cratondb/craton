@@ -11,7 +11,7 @@ Kimberlite provides **fine-grained Role-Based Access Control (RBAC)** to enforce
 - **4 roles** with escalating privileges (Auditor, User, Analyst, Admin)
 - **Field-level security** (column filtering)
 - **Row-level security** (RLS with WHERE clause injection)
-- **Multi-framework compliance** (HIPAA, GDPR, SOC 2, PCI DSS, ISO 27001, FedRAMP)
+- **Healthcare-grade compliance** (HIPAA-native; GDPR / SOC 2 / ISO 27001 / FedRAMP overlays for federal-touching healthcare)
 
 ---
 
@@ -54,7 +54,8 @@ Kimberlite supports **4 roles** with escalating privileges:
 - ❌ Cannot export data
 
 **Use Cases:**
-- SOX compliance auditors
+- HIPAA-required workforce auditors (per §164.308(a)(1)(ii)(D))
+- OCR investigations and BAA-bearing third parties
 - Security teams reviewing access patterns
 - External audit firms (Big 4)
 

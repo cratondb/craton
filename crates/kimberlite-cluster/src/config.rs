@@ -447,4 +447,18 @@ mod tests {
                 .unwrap_err();
         assert!(matches!(err, Error::InvalidPortRange(_, _)), "got {err:?}");
     }
+
+    #[test]
+    fn try_new_rejects_zero_nodes() {
+        let temp = TempDir::new().unwrap();
+        let err = ClusterConfig::try_new(temp.path().to_path_buf(), 0, 5432).unwrap_err();
+        assert!(matches!(err, Error::InvalidNodeCount(0)), "got {err:?}");
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid parameters")]
+    fn new_panics_on_zero_nodes() {
+        let temp = TempDir::new().unwrap();
+        let _ = ClusterConfig::new(temp.path().to_path_buf(), 0, 5432);
+    }
 }

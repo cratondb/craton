@@ -618,9 +618,10 @@ Default retention policies:
 - Administrative events: 10 years
 
 Retention is configurable per compliance requirement:
-- HIPAA: 6 years
-- SOX: 7 years
-- GDPR: Varies by purpose
+- HIPAA Privacy Rule §164.530(j)(2): 6 years
+- Pediatric records: until age of majority + 7 years (worst-case U.S. state)
+- HIPAA audit log: 6 years
+- GDPR: varies by lawful basis under Art. 6 / Art. 9
 
 ---
 

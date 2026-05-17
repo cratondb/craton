@@ -938,21 +938,17 @@ impl ScenarioType {
                 | Self::UpsertCrashMidConflict
                 | Self::UpsertWithComputedReturning
                 | Self::UpsertOnNonUniqueIndex
-                | Self::AsOfBeforeRetentionHorizon
                 | Self::AsOfDuringWrite
                 | Self::AsOfMonotonicityUnderClockSkew
                 | Self::AsOfRoundTripDeterminism
                 | Self::EraseAutoDiscoveryAcrossSchemaVersions
                 | Self::EraseAutoDiscoveryWithDroppedColumn
                 | Self::EraseAutoDiscoveryDeterminism
-                | Self::EraseAutoDiscoveryWithCrashMidScan
-                // Q2 — Healthcare clinical scenarios. Drivers ship as
-                // the v2 ingest path and FHIR projection workers land.
-                | Self::EhrAdmissionsSurge
-                | Self::LabResultDelayedDelivery
-                | Self::ClaimsBatchReconciliation
-                | Self::BreakGlassUnderLoad
-                | Self::ConsentRevocationCascade
+                | Self::EraseAutoDiscoveryWithCrashMidScan // Note: the 5 Q2 healthcare clinical scenarios + the
+                                                           // AsOfBeforeRetentionHorizon scenario were promoted to
+                                                           // real drivers in the v0.9.0 healthcare-pivot sweep —
+                                                           // see `fn ehr_admissions_surge` and siblings below.
+                                                           // They are no longer aspirational.
         )
     }
 
@@ -1210,7 +1206,6 @@ impl ScenarioConfig {
             | ScenarioType::UpsertCrashMidConflict
             | ScenarioType::UpsertWithComputedReturning
             | ScenarioType::UpsertOnNonUniqueIndex
-            | ScenarioType::AsOfBeforeRetentionHorizon
             | ScenarioType::AsOfDuringWrite
             | ScenarioType::AsOfMonotonicityUnderClockSkew
             | ScenarioType::AsOfRoundTripDeterminism
@@ -1221,15 +1216,29 @@ impl ScenarioConfig {
                 Self::aspirational_v07(scenario_type)
             }
 
-            // Q2 — Healthcare clinical scenarios. Share the same
-            // baseline-scaffold treatment as the v0.7.0 family until
-            // the v2 ingest + FHIR projection workers ship the
-            // domain-specific drivers.
-            ScenarioType::EhrAdmissionsSurge
-            | ScenarioType::LabResultDelayedDelivery
-            | ScenarioType::ClaimsBatchReconciliation
-            | ScenarioType::BreakGlassUnderLoad
-            | ScenarioType::ConsentRevocationCascade => Self::aspirational_v07(scenario_type),
+            // Q3 (v0.9.0) — Healthcare clinical scenarios. Promoted out
+            // of the aspirational_v07 set as part of the healthcare-pivot
+            // release sweep. Each driver captures the fault shape that
+            // the canary in description() must catch — the FHIR
+            // projector worker and audit-log inserter run against the
+            // same underlying VOPR primitives (gray-failure cycling,
+            // storage reordering, swizzle clogging), but the parameters
+            // are tuned to the clinical fault surface rather than the
+            // generic baseline.
+            ScenarioType::EhrAdmissionsSurge => Self::ehr_admissions_surge(),
+            ScenarioType::LabResultDelayedDelivery => Self::lab_result_delayed_delivery(),
+            ScenarioType::ClaimsBatchReconciliation => Self::claims_batch_reconciliation(),
+            ScenarioType::BreakGlassUnderLoad => Self::break_glass_under_load(),
+            ScenarioType::ConsentRevocationCascade => Self::consent_revocation_cascade(),
+
+            // Q3 (v0.9.0) — `AS OF` retention-horizon scenario. The
+            // canary is "time-travel queries against an offset older
+            // than the retention horizon must surface
+            // AsOfBeforeRetentionHorizon, not silent empty results".
+            // Storage faults + sustained writes push the retention
+            // boundary while readers issue AS OF queries at random
+            // historical offsets.
+            ScenarioType::AsOfBeforeRetentionHorizon => Self::as_of_before_retention_horizon(),
 
             // Q2 (v0.9.x) — Cluster supervisor scenarios. Each driver
             // expresses the fault shape the real `kimberlite-cluster`
@@ -3457,6 +3466,248 @@ impl ScenarioConfig {
         }
     }
 
+    // ========================================================================
+    // Q3 (v0.9.0) — Healthcare clinical scenario drivers. Each driver
+    // expresses the fault shape that the FHIR projection worker, X12
+    // claims ingester, audit-log inserter, and time-travel reader must
+    // survive under load. Tuned parameters mirror the canary contracts
+    // documented on each ScenarioType variant.
+    // ========================================================================
+
+    /// Q3 (v0.9.0) clinical scenario: EHR admissions surge.
+    ///
+    /// HL7 v2 ADT^A01 admissions burst (flu season, mass-casualty
+    /// triage) arrives via MLLP. The PV1 visit creation and the
+    /// `fhir.Patient.<tenant>` + `fhir.Encounter.<tenant>` stream
+    /// appends must remain atomic per-message. Storage reordering +
+    /// sustained high in-flight load reproduces the race where the
+    /// Patient stream gets ahead of the Encounter projection.
+    fn ehr_admissions_surge() -> Self {
+        Self {
+            scenario_type: ScenarioType::EhrAdmissionsSurge,
+            network_config: NetworkConfig {
+                min_delay_ns: 500_000,
+                max_delay_ns: 10_000_000,
+                drop_probability: 0.01,
+                duplicate_probability: 0.0,
+                max_in_flight: 4_000, // Sustained surge load
+            },
+            storage_config: StorageConfig {
+                // Tight write latencies that occasionally spike
+                // (admission bursts contend for the FHIR projection
+                // write path).
+                min_write_latency_ns: 200_000,
+                max_write_latency_ns: 8_000_000,
+                min_read_latency_ns: 50_000,
+                max_read_latency_ns: 500_000,
+                ..Default::default()
+            },
+            swizzle_clogger: Some(SwizzleClogger::mild()),
+            gray_failure_injector: None,
+            byzantine_injector: None,
+            num_tenants: 1,
+            time_compression_factor: 1.0,
+            max_time_ns: 30_000_000_000, // 30 s — sustained surge window
+            max_events: 50_000,          // High volume — admissions bursting
+        }
+    }
+
+    /// Q3 (v0.9.0) clinical scenario: lab result delayed delivery.
+    ///
+    /// ORU^R01 results arriving hours/days after the originating
+    /// Encounter. The FHIR projector must resolve `Observation.encounter`
+    /// against the historical Encounter snapshot, not the current
+    /// post-discharge state. Storage reordering models the
+    /// out-of-order arrival; the canary checks that AS-OF queries
+    /// return the same Encounter projection regardless of when the
+    /// resolving read is issued.
+    fn lab_result_delayed_delivery() -> Self {
+        Self {
+            scenario_type: ScenarioType::LabResultDelayedDelivery,
+            network_config: NetworkConfig {
+                min_delay_ns: 5_000_000,
+                max_delay_ns: 200_000_000, // Up to 200ms — pathology turnaround
+                drop_probability: 0.02,
+                duplicate_probability: 0.01,
+                max_in_flight: 1_500,
+            },
+            storage_config: StorageConfig {
+                // Wide read latency range — historical Encounter
+                // snapshot fetches contend with recent observation
+                // writes.
+                min_write_latency_ns: 500_000,
+                max_write_latency_ns: 20_000_000,
+                min_read_latency_ns: 100_000,
+                max_read_latency_ns: 2_000_000,
+                ..Default::default()
+            },
+            swizzle_clogger: Some(SwizzleClogger::aggressive()),
+            gray_failure_injector: None,
+            byzantine_injector: None,
+            num_tenants: 1,
+            time_compression_factor: 1.0,
+            max_time_ns: 35_000_000_000,
+            max_events: 25_000,
+        }
+    }
+
+    /// Q3 (v0.9.0) clinical scenario: claims batch reconciliation.
+    ///
+    /// Nightly X12 837 institutional-claim batch matched against 835
+    /// remittance responses. Append-only claims-event stream must
+    /// remain monotonic across the full batch even under injected
+    /// storage faults. A retried 837 submit must produce the same
+    /// post-state as a clean run (idempotency on
+    /// claim-control-number). High event volume plus storage
+    /// reordering plus occasional gray-failure cycling reproduces
+    /// the retry-during-fault shape.
+    fn claims_batch_reconciliation() -> Self {
+        Self {
+            scenario_type: ScenarioType::ClaimsBatchReconciliation,
+            network_config: NetworkConfig {
+                min_delay_ns: 1_000_000,
+                max_delay_ns: 25_000_000,
+                drop_probability: 0.08, // Triggers retries within the batch
+                duplicate_probability: 0.05, // Models clearinghouse re-submits
+                max_in_flight: 2_000,
+            },
+            storage_config: StorageConfig {
+                min_write_latency_ns: 1_000_000,
+                max_write_latency_ns: 30_000_000,
+                min_read_latency_ns: 200_000,
+                max_read_latency_ns: 5_000_000,
+                ..Default::default()
+            },
+            swizzle_clogger: Some(SwizzleClogger::aggressive()),
+            // Brief gray-failure cycling to interrupt the batch mid-run
+            // and force the reconciler down the retry path.
+            gray_failure_injector: Some(GrayFailureInjector::new(0.10, 0.30)),
+            byzantine_injector: None,
+            num_tenants: 1,
+            time_compression_factor: 1.0,
+            max_time_ns: 45_000_000_000, // 45 s — full batch + retries
+            max_events: 100_000,         // Models a 100k-claim batch
+        }
+    }
+
+    /// Q3 (v0.9.0) clinical scenario: break-glass under load.
+    ///
+    /// HIPAA § 164.510(b)(3) emergency override activated by a
+    /// clinician while 1000+ inserts/sec race the same patient's
+    /// streams. `BreakGlassActivated` audit event MUST appear at a
+    /// strictly earlier offset than every PHI read in the session;
+    /// `BreakGlassClosed` MUST list every resource id touched. The
+    /// canary watches for a torn audit chain where the activation
+    /// event ends up sequenced after a PHI read.
+    fn break_glass_under_load() -> Self {
+        Self {
+            scenario_type: ScenarioType::BreakGlassUnderLoad,
+            network_config: NetworkConfig {
+                min_delay_ns: 500_000,
+                max_delay_ns: 8_000_000,
+                drop_probability: 0.01,
+                duplicate_probability: 0.0,
+                max_in_flight: 5_000, // Heavy concurrent PHI access
+            },
+            storage_config: StorageConfig {
+                // Wide write latency range — the audit-log inserter and
+                // the PHI projection writer contend for the same log
+                // tail.
+                min_write_latency_ns: 100_000,
+                max_write_latency_ns: 15_000_000,
+                min_read_latency_ns: 50_000,
+                max_read_latency_ns: 1_000_000,
+                ..Default::default()
+            },
+            swizzle_clogger: Some(SwizzleClogger::mild()),
+            gray_failure_injector: None,
+            byzantine_injector: None,
+            num_tenants: 1,
+            time_compression_factor: 1.0,
+            max_time_ns: 20_000_000_000,
+            max_events: 60_000, // High event rate stresses the chain head
+        }
+    }
+
+    /// Q3 (v0.9.0) clinical scenario: consent revocation cascade.
+    ///
+    /// Patient withdraws consent (GDPR Art. 7(3) / HIPAA Authorization
+    /// revocation) while research queries against their PHI are in
+    /// flight. New queries after the revocation timestamp must return
+    /// empty; in-flight queries started before revocation must
+    /// complete with the pre-revocation snapshot. The audit chain
+    /// `ConsentWithdrawn → erasure-request → Effect::ProjectionRowsPurge`
+    /// must remain ordered. Models a torn revocation by injecting
+    /// storage write reordering between the consent table update and
+    /// the projection purge.
+    fn consent_revocation_cascade() -> Self {
+        Self {
+            scenario_type: ScenarioType::ConsentRevocationCascade,
+            network_config: NetworkConfig {
+                min_delay_ns: 1_000_000,
+                max_delay_ns: 12_000_000,
+                drop_probability: 0.02,
+                duplicate_probability: 0.01,
+                max_in_flight: 2_500,
+            },
+            storage_config: StorageConfig {
+                // Aggressive write reordering — the consent-table
+                // update and the projection purge ride separate
+                // batches.
+                min_write_latency_ns: 500_000,
+                max_write_latency_ns: 20_000_000,
+                min_read_latency_ns: 100_000,
+                max_read_latency_ns: 3_000_000,
+                ..Default::default()
+            },
+            swizzle_clogger: Some(SwizzleClogger::aggressive()),
+            gray_failure_injector: None,
+            byzantine_injector: None,
+            num_tenants: 1,
+            time_compression_factor: 1.0,
+            max_time_ns: 25_000_000_000,
+            max_events: 40_000,
+        }
+    }
+
+    /// Q3 (v0.9.0) scenario: `AS OF` before retention horizon.
+    ///
+    /// Time-travel queries against an offset older than the retention
+    /// horizon must surface `AsOfBeforeRetentionHorizon`, not silent
+    /// empty results. Models sustained writes pushing the retention
+    /// boundary forward while readers issue AS-OF queries at random
+    /// historical offsets. Storage reordering + gray-failure cycling
+    /// stresses the retention-horizon scan path under fault.
+    fn as_of_before_retention_horizon() -> Self {
+        Self {
+            scenario_type: ScenarioType::AsOfBeforeRetentionHorizon,
+            network_config: NetworkConfig {
+                min_delay_ns: 1_000_000,
+                max_delay_ns: 15_000_000,
+                drop_probability: 0.03,
+                duplicate_probability: 0.0,
+                max_in_flight: 1_500,
+            },
+            storage_config: StorageConfig {
+                min_write_latency_ns: 500_000,
+                max_write_latency_ns: 10_000_000,
+                min_read_latency_ns: 100_000,
+                max_read_latency_ns: 2_000_000,
+                ..Default::default()
+            },
+            swizzle_clogger: Some(SwizzleClogger::mild()),
+            // Brief gray failures interrupt the retention-scan path,
+            // exercising the recovery code that re-establishes the
+            // horizon after a fault.
+            gray_failure_injector: Some(GrayFailureInjector::new(0.08, 0.20)),
+            byzantine_injector: None,
+            num_tenants: 1,
+            time_compression_factor: 1.0,
+            max_time_ns: 30_000_000_000,
+            max_events: 35_000,
+        }
+    }
+
     /// Applies time compression to a duration.
     #[allow(clippy::cast_sign_loss, clippy::cast_precision_loss)]
     pub fn compress_time(&self, duration_ns: u64) -> u64 {
@@ -3721,6 +3972,54 @@ mod tests {
             assert!(
                 config.max_events > 15_000,
                 "{scenario:?} max_events {} is too low for cluster cadence",
+                config.max_events,
+            );
+        }
+    }
+
+    /// v0.9.0 healthcare-pivot sweep — verifies all 6 healthcare clinical
+    /// scenarios (5 Q2 clinical + AsOfBeforeRetentionHorizon) are promoted
+    /// out of the aspirational set, dispatched to real driver methods, and
+    /// produce non-baseline configs with the fault shapes the canary
+    /// contracts describe.
+    #[test]
+    fn test_healthcare_scenarios_have_real_drivers() {
+        let healthcare_scenarios = [
+            ScenarioType::EhrAdmissionsSurge,
+            ScenarioType::LabResultDelayedDelivery,
+            ScenarioType::ClaimsBatchReconciliation,
+            ScenarioType::BreakGlassUnderLoad,
+            ScenarioType::ConsentRevocationCascade,
+            ScenarioType::AsOfBeforeRetentionHorizon,
+        ];
+
+        for scenario in healthcare_scenarios {
+            let config = ScenarioConfig::new(scenario, 12345);
+            assert_eq!(config.scenario_type, scenario);
+            assert!(
+                !scenario.is_aspirational(),
+                "{scenario:?} still tagged aspirational after healthcare-pivot driver pass",
+            );
+            assert!(ScenarioType::all().contains(&scenario));
+            assert!(!scenario.name().is_empty());
+            assert!(!scenario.description().is_empty());
+            // Healthcare scenarios all stress the storage / projection
+            // path — every driver carries a non-default storage_config
+            // or a swizzle_clogger to express the fault surface.
+            let baseline_storage = StorageConfig::default();
+            let drives_storage = config.storage_config.max_write_latency_ns
+                != baseline_storage.max_write_latency_ns
+                || config.swizzle_clogger.is_some();
+            assert!(
+                drives_storage,
+                "{scenario:?} driver does not stress the storage / projection path",
+            );
+            // Non-baseline event budget — healthcare scenarios run long
+            // enough to span an admission burst, a claims batch, or a
+            // multi-second AS-OF window.
+            assert!(
+                config.max_events >= 25_000,
+                "{scenario:?} max_events {} is too low for the clinical cadence",
                 config.max_events,
             );
         }

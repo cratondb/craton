@@ -140,8 +140,8 @@ await client.createStream('audit_log', DataClass.Public);
 | `DataClass.Deidentified` | HIPAA Safe Harbor de-identified |
 | `DataClass.PII` | GDPR Art. 4 personal data |
 | `DataClass.Sensitive` | GDPR Art. 9 special-category data |
-| `DataClass.PCI` | Payment Card Industry data |
-| `DataClass.Financial` | SOX financial records |
+| `DataClass.PCI` | Payment card data (e.g. patient billing card-on-file) |
+| `DataClass.Financial` | Financial records (e.g. claims payments, invoices) |
 | `DataClass.Confidential` | Internal / trade secret |
 | `DataClass.Public` | No restrictions |
 

@@ -762,6 +762,30 @@ mod tests {
     }
 
     #[test]
+    fn try_new_rejects_zero_cluster_size() {
+        let err = Clock::try_new(ReplicaId::new(0), 0).unwrap_err();
+        assert!(
+            matches!(err, ClockError::InvalidClusterConfig(_)),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn try_new_rejects_replica_out_of_range() {
+        let err = Clock::try_new(ReplicaId::new(5), 3).unwrap_err();
+        assert!(
+            matches!(err, ClockError::InvalidClusterConfig(_)),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid cluster parameters")]
+    fn new_panics_on_zero_cluster_size() {
+        let _ = Clock::new(ReplicaId::new(0), 0);
+    }
+
+    #[test]
     fn learn_sample_keeps_minimum_delay() {
         let mut clock = Clock::new(ReplicaId::new(0), 3);
         // Anchor offsets to the actual window start so the stale-ping guard

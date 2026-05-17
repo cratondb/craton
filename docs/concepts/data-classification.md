@@ -7,7 +7,7 @@ order: 6
 
 # Data Classification
 
-Kimberlite provides **8 data classification levels** to support multi-framework compliance across healthcare (HIPAA), privacy (GDPR), financial (PCI DSS, SOX), and security standards (ISO 27001, FedRAMP).
+Kimberlite provides **8 data classification levels** built for healthcare compliance — HIPAA-native (PHI, de-identified, audit records) with overlay framework support (GDPR, PCI DSS for billing card-on-file, ISO 27001, FedRAMP for federal-touching healthcare).
 
 ---
 
@@ -172,27 +172,26 @@ Public < Deidentified < Confidential < PII < Financial < PCI < Sensitive < PHI
 
 ### 6. Financial Data
 
-**Definition:** Financial records subject to Sarbanes-Oxley (SOX) regulations.
+**Definition:** Financial records associated with healthcare operations — claims payments, payer remittance, clinic invoicing, ledger entries. `DataClass::Financial` is retained from the pre-pivot multi-vertical scope and remains useful in healthcare contexts (revenue cycle management, clinical research grant accounting, hospital billing). It does *not* imply SOX coverage in v0.9.0+; finance verticals are out of product scope.
 
 **Examples:**
-- General ledger entries
-- Financial statements
-- Audit trails for financial transactions
-- Balance sheets, income statements
-- Revenue and expense records
+- X12 835 remittance records
+- Claim adjustment / denial events
+- Hospital billing entries
+- Clinical research grant ledgers
+- Practice invoicing
 
-**Compliance:** Sarbanes-Oxley Act § 302, § 404
+**Compliance:** General financial recordkeeping; HIPAA still applies if any field references the patient.
 
 **Requirements:**
 - ✅ Encryption at rest
-- ✅ Audit logging (SOX § 404)
+- ✅ Audit logging
 - ✅ Immutable audit trails
-- ✅ Internal controls documentation
-- Minimum retention: **7 years** (SOX § 802)
+- Minimum retention: see operator policy (HIPAA §164.530(j)(2): 6 years for any PHI-touching record)
 
-**Applicability:** Public companies and their partners
+**Applicability:** Any clinic, payer, or research organization that issues or receives healthcare payments
 
-**Applicable Frameworks:** SOX, ISO 27001, FedRAMP
+**Applicable Frameworks:** HIPAA (when PHI-linked), ISO 27001, internal financial-controls policies
 
 ---
 
@@ -357,16 +356,16 @@ Financial (4) < PCI (5) < Sensitive (6) < PHI (7)
 
 ## Framework Mapping
 
-| Classification | HIPAA | GDPR | PCI DSS | SOX | ISO 27001 | FedRAMP |
-|----------------|-------|------|---------|-----|-----------|---------|
-| PHI | ✅ | ✅ (PII) | — | — | ✅ | ✅ |
-| Deidentified | ✅ | — | — | — | — | — |
-| PII | — | ✅ | — | — | ✅ | ✅ |
-| Sensitive | — | ✅ (Art 9) | — | — | ✅ | ✅ |
-| PCI | — | ✅ (PII) | ✅ | — | ✅ | ✅ |
-| Financial | — | — | — | ✅ | ✅ | ✅ |
-| Confidential | — | — | — | — | ✅ | ✅ |
-| Public | — | — | — | — | — | — |
+| Classification | HIPAA | GDPR | PCI DSS | ISO 27001 | FedRAMP |
+|----------------|-------|------|---------|-----------|---------|
+| PHI | ✅ | ✅ (special-category) | — | ✅ | ✅ |
+| Deidentified | ✅ (Safe Harbor) | — | — | — | — |
+| PII | — | ✅ | — | ✅ | ✅ |
+| Sensitive | — | ✅ (Art 9) | — | ✅ | ✅ |
+| PCI | — | ✅ (PII) | ✅ | ✅ | ✅ |
+| Financial | ✅ (when PHI-linked) | — | — | ✅ | ✅ |
+| Confidential | — | — | — | ✅ | ✅ |
+| Public | — | — | — | — | — |
 
 ---
 
@@ -545,7 +544,7 @@ DataClass::Deidentified // Anonymized data (unchanged)
 DataClass::PII         // User data (GDPR)
 DataClass::Sensitive   // Special category data (GDPR Art 9)
 DataClass::PCI         // Payment card data (PCI DSS)
-DataClass::Financial   // Financial records (SOX)
+DataClass::Financial   // Financial records (claims, remittance, hospital billing — retained from pre-pivot scope, no SOX implication)
 DataClass::Confidential // Internal business data
 DataClass::Public      // Publicly available data
 ```
@@ -565,4 +564,4 @@ All existing `NonPHI` streams are migrated to `Public` (least restrictive). **Re
 
 ---
 
-**Key Takeaway:** Proper data classification is the **foundation of compliance**. Kimberlite's 8-level classification system ensures you meet HIPAA, GDPR, PCI DSS, SOX, ISO 27001, and FedRAMP requirements with **formal verification** guarantees.
+**Key Takeaway:** Proper data classification is the **foundation of compliance**. Kimberlite's 8-level classification system is HIPAA-native — every PHI-bearing field is tagged at the storage boundary — and composes with GDPR / PCI DSS / ISO 27001 / FedRAMP as overlays for healthcare workloads that need them, with **formal verification** guarantees.

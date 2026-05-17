@@ -33,11 +33,11 @@ order: 1
 
 1. **Verification artifacts:** ~91 Kani proofs (PR-gated), ~25 TLA+ theorems (TLC PR-gated; TLAPS nightly), 92 compliance TLA+ theorems *formalized* (TLAPS proofs run in nightly aspirational CI — not yet PR-gated; target v0.5.0), 74 VOPR scenario variants (~50 substantive)
 2. **Traceability matrix:** Every theorem traced from specification → implementation → testing. See `docs/internals/formal-verification/traceability-matrix.md` for PR-gated vs nightly status per row.
-3. **Compliance modelling:** 23 frameworks modelled as TLA+ specifications. Mechanical verification status varies per framework; see §Formal Verification Evidence below.
-   - **USA:** HIPAA, HITECH, PCI DSS, SOC 2, CCPA/CPRA, GLBA, SOX, FERPA, NIST 800-53, CMMC, 21 CFR Part 11, Legal Compliance
-   - **EU:** GDPR, NIS2, DORA, eIDAS
-   - **Australia:** Privacy Act (APPs), APRA CPS 234, Essential Eight, NDB Scheme, IRAP
-   - **International:** ISO 27001, FedRAMP
+3. **Compliance modelling:** Healthcare-native frameworks plus overlay frameworks modelled as TLA+ specifications. Mechanical verification status varies per framework; see §Formal Verification Evidence below.
+   - **Healthcare-native (USA):** HIPAA (Privacy + Security + Breach Notification), HITECH, 21 CFR Part 11, CCPA / CPRA
+   - **Healthcare-relevant (EU + APAC):** GDPR (Art. 9 special-category data), Australian Privacy Act (APPs), NDB Scheme
+   - **Overlay (any healthcare SaaS):** SOC 2, ISO 27001, NIST 800-53, FedRAMP (for federal-touching healthcare — VA, IHS, DoD MTFs)
+   - **Out of scope post-pivot:** SOX, GLBA, FERPA, CMMC, NIS2, DORA, eIDAS, IRAP (legacy multi-vertical scope; specs retained for historical reference)
 
 > ⚠️ **No third-party certifications have been completed.** Kimberlite is *designed to support* HIPAA, SOC 2, GDPR, and the frameworks above; SOC 2 Type II and HIPAA attestation are ROADMAP.md v1.0 targets. This package supports an auditor's evidence-gathering, not the auditor's sign-off.
 
@@ -48,7 +48,7 @@ order: 1
 | **Formal Verification** | ✅ 6 layers | ❌ None | ⚠️ Partial | ❌ None | ❌ None |
 | **TLA+ Specifications** | ✅ 92 compliance proofs | ❌ None | ✅ Limited | ❌ None | ❌ None |
 | **Kani Proofs (Rust)** | ✅ 143 proofs | ❌ None | N/A | N/A | N/A |
-| **Compliance Specs** | ✅ 23 frameworks @ 100% | ❌ None | ❌ None | ❌ None | ❌ None |
+| **Compliance Specs** | ✅ HIPAA-native + overlay frameworks @ 100% | ❌ None | ❌ None | ❌ None | ❌ None |
 | **Traceability Matrix** | ✅ 100% | ❌ None | ⚠️ Partial | ❌ None | ❌ None |
 | **HIPAA Ready** | ✅ 100% | ⚠️ Manual | ⚠️ Manual | ⚠️ Manual | ⚠️ Manual |
 | **GDPR Ready** | ✅ 100% | ⚠️ Manual | ⚠️ Manual | ⚠️ Manual | ⚠️ Manual |
@@ -607,36 +607,42 @@ A: Certificates are signed by our CI system (GitHub Actions) using an Ed25519 pr
 
 **Readiness:** 100% (formal verification complete)
 
-### Additional USA Frameworks
+### Healthcare-Native Frameworks (USA)
 
-**v0.4.3 Expansion:** 8 additional USA frameworks now at 100% formal verification:
-- **HITECH** (Healthcare): Extends HIPAA with 60-day breach notification, minimum necessary access
-- **21 CFR Part 11** (FDA): Electronic records/signatures with Ed25519 binding
-- **CCPA/CPRA** (California Privacy): Right to know, delete, correct, opt-out
-- **GLBA** (Financial Privacy): Safeguards Rule, Privacy Rule, 30-day FTC notification
-- **SOX** (Sarbanes-Oxley): Section 302/404 controls, 7-year retention
-- **FERPA** (Education): Consent required, disclosure tracking
-- **NIST 800-53** (Federal): Extends FedRAMP with component inventory, system monitoring
-- **CMMC** (Defense): 3-level maturity model (basic/intermediate/good cyber hygiene)
-- **Legal Compliance**: Legal hold, chain of custody, eDiscovery
+Formally verified frameworks directly relevant to healthcare workloads:
+- **HIPAA** (Privacy + Security + Breach Notification Rules): TPO carve-out, minimum necessary, Safe Harbor de-identification (45 CFR §164.514(b)(2)), 60-day breach notification
+- **HITECH**: Extends HIPAA with 60-day breach notification, minimum necessary access, BAA enforcement
+- **21 CFR Part 11** (FDA): Electronic records/signatures with Ed25519 binding — clinical trials and research
+- **CCPA / CPRA** (California Privacy): Right to know, delete, correct, opt-out — applies to California patients
 
 Each framework includes complete TLAPS proofs mapped to core properties.
 
-### EU Frameworks
+### Overlay Frameworks (any healthcare SaaS)
 
-**v0.4.3 Expansion:** 2 additional EU frameworks now at 100% formal verification:
-- **NIS2** (Critical Infrastructure): 24h early warning, 72h reporting, incident response
-- **DORA** (Digital Operational Resilience): ICT risk management, resilience testing via VOPR
-- **eIDAS** (Digital Identity): Qualified timestamps (RFC 3161), electronic signatures/seals
+These frameworks compose with HIPAA when an operator opts in:
+- **SOC 2** (Trust Services Criteria): Security, availability, processing integrity, confidentiality, privacy
+- **ISO 27001** (ISMS): Information security management system, risk-based controls
+- **NIST 800-53**: Component inventory, system monitoring (required for federal-touching healthcare — VA, IHS, DoD MTFs)
+- **FedRAMP**: Cloud authorization for federal-touching healthcare workloads
 
-### Australia Frameworks
+### Healthcare-Relevant Frameworks (EU + APAC)
 
-**v0.4.3 Expansion:** 5 Australian frameworks now at 100% formal verification:
-- **Privacy Act (APPs)**: 13 Australian Privacy Principles (APP 11/12/13)
-- **APRA CPS 234** (Banking): Extends ISO 27001, 72h incident notification
-- **Essential Eight** (ASD Maturity): Restrict admin privileges, regular backups
+- **GDPR** (Art. 9 special-category data): Lawful basis, right to erasure, data portability, consent
+- **Australian Privacy Act (APPs)**: 13 Australian Privacy Principles (APP 11/12/13) — relevant for AU clinics
 - **NDB Scheme** (Breach Notification): 30-day assessment, dual notification (individuals + OAIC)
-- **IRAP** (ISM Compliance): Extends FedRAMP, 4-tier classification (UNOFFICIAL/OFFICIAL/SECRET/TOP_SECRET)
+
+### Out of scope (healthcare pivot Q1 2026)
+
+The following frameworks were formalized under the legacy multi-vertical scope and are retained in `specs/` for historical reference. They are no longer part of Kimberlite's product positioning:
+
+- **SOX** (Sarbanes-Oxley) — finance vertical
+- **GLBA** (Financial Privacy) — finance vertical
+- **FERPA** (Education) — education vertical
+- **CMMC** (Defense) — defense vertical
+- **NIS2 / DORA / eIDAS** — EU finance/identity verticals
+- **APRA CPS 234** — AU finance vertical
+- **Essential Eight / IRAP** — AU defense/government verticals
+- **Legal Compliance** (legal-hold/chain-of-custody/eDiscovery) — legal vertical (note: legal hold remains a *feature* in Kimberlite, just no longer marketed as a vertical)
 
 ---
 
@@ -707,10 +713,10 @@ Each framework includes complete TLAPS proofs mapped to core properties.
 
 **Last Updated:** 2026-02-07
 **Version:** 0.4.3
-**Formally Verified Frameworks:** All 23 frameworks at 100% with complete TLAPS proofs
-**Total Proofs:** 92 TLAPS compliance proofs across all frameworks
+**Formally Verified Frameworks (healthcare scope after Q1 2026 pivot):** HIPAA-native + healthcare-relevant + overlay frameworks at 100% with complete TLAPS proofs
+**Total Proofs:** 92 TLAPS compliance proofs (full set retained; out-of-scope frameworks marked in §Healthcare-Native Frameworks above)
 **Coverage:**
-- **USA (12):** HIPAA, HITECH, PCI DSS, SOC 2, CCPA/CPRA, GLBA, SOX, FERPA, NIST 800-53, CMMC, 21 CFR Part 11, Legal Compliance
-- **EU (4):** GDPR, NIS2, DORA, eIDAS
-- **Australia (5):** Privacy Act (APPs), APRA CPS 234, Essential Eight, NDB Scheme, IRAP
-- **International (2):** ISO 27001, FedRAMP
+- **Healthcare-native (USA):** HIPAA, HITECH, 21 CFR Part 11, CCPA / CPRA
+- **Healthcare-relevant (EU + APAC):** GDPR, Australian Privacy Act (APPs), NDB Scheme
+- **Overlay (any healthcare SaaS):** SOC 2, ISO 27001, NIST 800-53, FedRAMP
+- **Retained for historical reference (out of product scope):** SOX, GLBA, FERPA, CMMC, NIS2, DORA, eIDAS, APRA CPS 234, Essential Eight, IRAP, Legal Compliance, PCI DSS

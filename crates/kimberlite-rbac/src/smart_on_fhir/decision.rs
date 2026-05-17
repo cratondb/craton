@@ -100,7 +100,7 @@ fn action_permitted(granted: ScopeActions, requested: Action) -> bool {
 /// `Allow` beats `AllowWithPatientContext` beats `MissingPatientContext`
 /// beats `Deny`. Used to merge candidate outcomes within a scope set.
 fn elevate(current: ScopeDecision, candidate: ScopeDecision) -> ScopeDecision {
-    use ScopeDecision::*;
+    use ScopeDecision::{Allow, AllowWithPatientContext, Deny, MissingPatientContext};
     match (&current, &candidate) {
         (Allow, _) | (_, Allow) => Allow,
         (AllowWithPatientContext { .. }, _) => current,

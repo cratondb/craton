@@ -152,24 +152,6 @@ impl HealthcareTemplate {
     }
 }
 
-/// Finance vertical landing page template.
-#[derive(Template, WebTemplate)]
-#[template(path = "finance.html")]
-pub struct FinanceTemplate {
-    pub title: String,
-    /// Build version for cache busting static assets.
-    pub v: &'static str,
-}
-
-impl FinanceTemplate {
-    pub fn new(title: impl Into<String>) -> Self {
-        Self {
-            title: title.into(),
-            v: BUILD_VERSION,
-        }
-    }
-}
-
 /// A link in the sidebar navigation.
 pub struct SidebarLink {
     pub title: String,

@@ -8,7 +8,6 @@ pub mod compare;
 pub mod docs;
 pub mod download;
 pub mod faq;
-pub mod finance;
 pub mod healthcare;
 pub mod home;
 pub mod pressurecraft;

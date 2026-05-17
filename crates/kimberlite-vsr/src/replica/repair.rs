@@ -938,6 +938,50 @@ mod tests {
     }
 
     #[test]
+    fn repair_state_try_new_rejects_empty_range() {
+        let err = RepairState::try_new(
+            Nonce::from_bytes([1u8; crate::types::NONCE_LENGTH]),
+            OpNumber::new(5),
+            OpNumber::new(5),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                crate::VsrError::InvalidRepairRange { start: 5, end: 5 }
+            ),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn repair_state_try_new_rejects_inverted_range() {
+        let err = RepairState::try_new(
+            Nonce::from_bytes([1u8; crate::types::NONCE_LENGTH]),
+            OpNumber::new(10),
+            OpNumber::new(5),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                crate::VsrError::InvalidRepairRange { start: 10, end: 5 }
+            ),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid op range")]
+    fn repair_state_new_panics_on_empty_range() {
+        let _ = RepairState::new(
+            Nonce::from_bytes([1u8; crate::types::NONCE_LENGTH]),
+            OpNumber::new(5),
+            OpNumber::new(5),
+        );
+    }
+
+    #[test]
     fn start_repair_broadcasts_request() {
         let config = test_config_3();
         let replica = ReplicaState::new(ReplicaId::new(0), config);

@@ -76,6 +76,13 @@ jobs:
           - fuzz_wire_deserialize
           - fuzz_wire_typed
           - fuzz_wire_vsr
+          # Healthcare-pivot Q3 targets — FHIR, X12, Safe Harbor, audit-sig.
+          # These cover the third-party-input surfaces (clearinghouse,
+          # EHR ingest, OCR-audit-bearing exports) added in v0.9.0.
+          - fuzz_fhir_r4_resource
+          - fuzz_x12_envelope
+          - fuzz_deid_safe_harbor
+          - fuzz_audit_export_roundtrip
 
     steps:
       - name: Checkout code

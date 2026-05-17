@@ -31,23 +31,26 @@ WHERE (resource->>'status') = $1;
 -- params: [Value::Text("completed")]
 ```
 
-### Legal: query inside case-document fragments
+### Claims: query inside X12 837 envelopes
 
 ```sql
--- Find documents tagged 'urgent' in the metadata JSON
-SELECT id, title FROM legal_documents
-WHERE metadata @> $1;
--- params: [Value::Json({"tag": "urgent"})]
+-- Find professional-claim batches submitted by a clearinghouse
+SELECT submission_id, received_at FROM x12_claim_batches
+WHERE (envelope->>'transactionSet') = $1
+  AND (envelope->>'senderId') = $2
+ORDER BY received_at DESC
+LIMIT 100;
+-- params: [Value::Text("837"), Value::Text("CLEARINGHOUSE_ID")]
 ```
 
-### Finance: filter on FIX message metadata
+### Audit: filter signed audit-entry metadata
 
 ```sql
--- Trade messages with venue 'XNYS' in their FIX header
-SELECT trade_id, executed_at FROM trade_messages
-WHERE (header->>'venue') = $1
-ORDER BY executed_at DESC
-LIMIT 100;
+-- Audit entries flagged as break-glass access
+SELECT entry_id, actor_id, occurred_at FROM audit_log
+WHERE metadata @> $1
+ORDER BY occurred_at DESC;
+-- params: [Value::Json({"reason": "break_glass"})]
 ```
 
 ## Containment semantics

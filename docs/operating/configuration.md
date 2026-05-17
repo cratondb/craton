@@ -98,9 +98,10 @@ batch_rps = 100         # Throttled first under load
 enabled = true
 
 # Override default retention periods (days)
-# phi_min_retention = 2190        # 6 years (HIPAA)
-# financial_min_retention = 2555  # 7 years (SOX)
-# pci_min_retention = 365         # 1 year (PCI DSS)
+# phi_min_retention = 2190             # 6 years (HIPAA Privacy Rule §164.530(j)(2))
+# pediatric_min_retention_years = 25   # Until age of majority + 7 years (worst-case state)
+# audit_min_retention = 2190           # 6 years (HIPAA audit log retention)
+# pci_min_retention = 365              # 1 year (PCI DSS, for billing card-on-file)
 
 # Scan interval for expired streams
 scan_interval = "1h"
@@ -214,11 +215,12 @@ Assign tenants to tiers via the `tenant_priorities` map in the rate limiting con
 |--------|------|---------|-------------|
 | `enabled` | Boolean | `true` | Enable retention policy enforcement |
 | `scan_interval` | Duration | `1h` | How often to scan for expired streams |
-| `phi_min_retention` | Integer | `2190` | PHI minimum retention in days (6 years, HIPAA) |
-| `financial_min_retention` | Integer | `2555` | Financial minimum retention in days (7 years, SOX) |
-| `pci_min_retention` | Integer | `365` | PCI minimum retention in days (1 year, PCI DSS) |
+| `phi_min_retention` | Integer | `2190` | PHI minimum retention in days (6 years, HIPAA §164.530(j)(2)) |
+| `pediatric_min_retention_years` | Integer | `25` | Pediatric records retention to age of majority + 7 years (worst-case state) |
+| `audit_min_retention` | Integer | `2190` | Audit-log minimum retention in days (6 years, HIPAA audit-log policy) |
+| `pci_min_retention` | Integer | `365` | PCI minimum retention in days (1 year, PCI DSS — for billing card-on-file) |
 
-**Legal Holds:** Streams under legal hold are exempt from automatic deletion regardless of retention policy. Use the compliance API to manage legal holds.
+**Legal Holds:** Streams under a legal hold (subpoena, malpractice litigation, OCR investigation) are exempt from automatic deletion regardless of retention policy. Use the compliance API to manage legal holds.
 
 ### Telemetry
 
@@ -315,7 +317,7 @@ election_timeout_max = "200ms"
 max_record_size = "512KB"   # Smaller records for faster sync
 ```
 
-**Use when:** Financial, healthcare, or legal data requiring guaranteed durability
+**Use when:** PHI, audit logs, or any healthcare data requiring guaranteed durability under HIPAA / state breach laws
 
 ### Multi-Tenant SaaS
 

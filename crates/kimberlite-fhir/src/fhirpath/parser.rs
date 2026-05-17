@@ -154,7 +154,7 @@ impl Parser {
                 self.bump();
                 let v: Value = if s.contains('.') {
                     s.parse::<f64>()
-                        .map(|f| Value::from(f))
+                        .map(Value::from)
                         .map_err(|_| ParseError::Unsupported(format!("invalid number `{s}`")))?
                 } else {
                     s.parse::<i64>()

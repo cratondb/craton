@@ -2008,6 +2008,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "kimberlite-fhir"
+version = "0.8.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "kimberlite-fuzz"
 version = "0.0.0"
 dependencies = [
@@ -2016,7 +2026,9 @@ dependencies = [
  "chrono",
  "kimberlite",
  "kimberlite-abac",
+ "kimberlite-compliance",
  "kimberlite-crypto",
+ "kimberlite-fhir",
  "kimberlite-kernel",
  "kimberlite-query",
  "kimberlite-rbac",
@@ -2026,9 +2038,12 @@ dependencies = [
  "kimberlite-types",
  "kimberlite-vsr",
  "kimberlite-wire",
+ "kimberlite-x12",
  "libfuzzer-sys",
  "once_cell",
  "postcard",
+ "serde",
+ "serde_json",
  "sqlparser",
  "tempfile",
 ]
@@ -2086,6 +2101,8 @@ name = "kimberlite-rbac"
 version = "0.8.0"
 dependencies = [
  "blake3",
+ "chrono",
+ "jsonwebtoken",
  "kimberlite-types",
  "serde",
  "serde_json",
@@ -2217,6 +2234,14 @@ dependencies = [
  "kimberlite-crypto",
  "kimberlite-types",
  "postcard",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "kimberlite-x12"
+version = "0.8.0"
+dependencies = [
  "serde",
  "thiserror",
 ]

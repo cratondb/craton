@@ -226,18 +226,18 @@ mod tests {
 
     #[test]
     fn segments_named_returns_all_matches() {
-        let msh = dummy_msh();
-        let obx_one = Segment {
+        let header = dummy_msh();
+        let obx_first = Segment {
             name: "OBX".into(),
             fields: vec![Field::from_text("1"), Field::from_text("NM")],
         };
-        let obx_two = Segment {
+        let obx_second = Segment {
             name: "OBX".into(),
             fields: vec![Field::from_text("2"), Field::from_text("ST")],
         };
         let msg = Message {
             encoding: Encoding::standard(),
-            segments: vec![msh, obx_one, obx_two],
+            segments: vec![header, obx_first, obx_second],
         };
         assert_eq!(msg.segments_named("OBX").count(), 2);
     }

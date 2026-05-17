@@ -79,6 +79,19 @@ jobs:
           java -cp $TLA_JAR tlc2.TLC -deadlock -workers $TLC_WORKERS -depth 8 -config specs/tla/Compliance.cfg specs/tla/Compliance.tla
         continue-on-error: false
 
+      # Healthcare-pivot Q3 — Healthcare.tla extends Compliance.tla with
+      # the three HIPAA-specific invariants the generic compliance shape
+      # cannot express:
+      #
+      #   - SafeHarborCoverage (45 CFR §164.514(b)(2))
+      #   - BreakGlassAuditOrder (HIPAA §164.510(b)(3))
+      #   - ConsentRevocationCausality + NoPhiReadAfterRevocation
+      #     (HIPAA Authorization revocation + GDPR Art. 7(3))
+      - name: Verify Healthcare.tla
+        run: |
+          java -cp $TLA_JAR tlc2.TLC -deadlock -workers $TLC_WORKERS -depth 8 -config specs/tla/Healthcare.cfg specs/tla/Healthcare.tla
+        continue-on-error: false
+
       - name: Upload TLC logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

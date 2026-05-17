@@ -48,7 +48,7 @@ exclude = ["fuzz", "examples/rust"]
 default-members = ["crates/kimberlite"]
 
 [workspace.package]
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
@@ -195,37 +195,37 @@ signal-hook = "0.4"
 signal-hook-mio = { version = "0.3", features = ["support-v1_0"] }
 
 # Internal crates
-kimberlite = { version = "0.8.0", path = "crates/kimberlite" }
-kimberlite-types = { version = "0.8.0", path = "crates/kimberlite-types" }
-kimberlite-crypto = { version = "0.8.0", path = "crates/kimberlite-crypto" }
-kimberlite-storage = { version = "0.8.0", path = "crates/kimberlite-storage" }
-kimberlite-kernel = { version = "0.8.0", path = "crates/kimberlite-kernel" }
-kimberlite-directory = { version = "0.8.0", path = "crates/kimberlite-directory" }
-kimberlite-agent-protocol = { version = "0.8.0", path = "crates/kimberlite-agent-protocol" }
-kimberlite-sim = { version = "0.8.0", path = "crates/kimberlite-sim" }
-kimberlite-sim-macros = { version = "0.8.0", path = "crates/kimberlite-sim-macros" }
-kimberlite-properties = { version = "0.8.0", path = "crates/kimberlite-properties" }
-kimberlite-vsr = { version = "0.8.0", path = "crates/kimberlite-vsr" }
-kimberlite-store = { version = "0.8.0", path = "crates/kimberlite-store" }
-kimberlite-query = { version = "0.8.0", path = "crates/kimberlite-query" }
-kimberlite-wire = { version = "0.8.0", path = "crates/kimberlite-wire" }
-kimberlite-server = { version = "0.8.0", path = "crates/kimberlite-server" }
-kimberlite-client = { version = "0.8.0", path = "crates/kimberlite-client" }
-kimberlite-config = { version = "0.8.0", path = "crates/kimberlite-config" }
-kimberlite-dev = { version = "0.8.0", path = "crates/kimberlite-dev" }
-kimberlite-migration = { version = "0.8.0", path = "crates/kimberlite-migration" }
-kimberlite-cluster = { version = "0.8.0", path = "crates/kimberlite-cluster" }
-kimberlite-studio = { version = "0.8.0", path = "crates/kimberlite-studio" }
-kimberlite-sharing = { version = "0.8.0", path = "crates/kimberlite-sharing" }
-kimberlite-mcp = { version = "0.8.0", path = "crates/kimberlite-mcp" }
-kimberlite-ffi = { version = "0.8.0", path = "crates/kimberlite-ffi" }
-kimberlite-node = { version = "0.8.0", path = "crates/kimberlite-node" }
-kimberlite-compliance = { version = "0.8.0", path = "crates/kimberlite-compliance" }
-kimberlite-rbac = { version = "0.8.0", path = "crates/kimberlite-rbac" }
-kimberlite-abac = { version = "0.8.0", path = "crates/kimberlite-abac" }
-kimberlite-io = { version = "0.8.0", path = "crates/kimberlite-io" }
-kimberlite-oracle = { version = "0.8.0", path = "crates/kimberlite-oracle" }
-kimberlite-test-harness = { version = "0.8.0", path = "crates/kimberlite-test-harness" }
+kimberlite = { version = "0.9.0", path = "crates/kimberlite" }
+kimberlite-types = { version = "0.9.0", path = "crates/kimberlite-types" }
+kimberlite-crypto = { version = "0.9.0", path = "crates/kimberlite-crypto" }
+kimberlite-storage = { version = "0.9.0", path = "crates/kimberlite-storage" }
+kimberlite-kernel = { version = "0.9.0", path = "crates/kimberlite-kernel" }
+kimberlite-directory = { version = "0.9.0", path = "crates/kimberlite-directory" }
+kimberlite-agent-protocol = { version = "0.9.0", path = "crates/kimberlite-agent-protocol" }
+kimberlite-sim = { version = "0.9.0", path = "crates/kimberlite-sim" }
+kimberlite-sim-macros = { version = "0.9.0", path = "crates/kimberlite-sim-macros" }
+kimberlite-properties = { version = "0.9.0", path = "crates/kimberlite-properties" }
+kimberlite-vsr = { version = "0.9.0", path = "crates/kimberlite-vsr" }
+kimberlite-store = { version = "0.9.0", path = "crates/kimberlite-store" }
+kimberlite-query = { version = "0.9.0", path = "crates/kimberlite-query" }
+kimberlite-wire = { version = "0.9.0", path = "crates/kimberlite-wire" }
+kimberlite-server = { version = "0.9.0", path = "crates/kimberlite-server" }
+kimberlite-client = { version = "0.9.0", path = "crates/kimberlite-client" }
+kimberlite-config = { version = "0.9.0", path = "crates/kimberlite-config" }
+kimberlite-dev = { version = "0.9.0", path = "crates/kimberlite-dev" }
+kimberlite-migration = { version = "0.9.0", path = "crates/kimberlite-migration" }
+kimberlite-cluster = { version = "0.9.0", path = "crates/kimberlite-cluster" }
+kimberlite-studio = { version = "0.9.0", path = "crates/kimberlite-studio" }
+kimberlite-sharing = { version = "0.9.0", path = "crates/kimberlite-sharing" }
+kimberlite-mcp = { version = "0.9.0", path = "crates/kimberlite-mcp" }
+kimberlite-ffi = { version = "0.9.0", path = "crates/kimberlite-ffi" }
+kimberlite-node = { version = "0.9.0", path = "crates/kimberlite-node" }
+kimberlite-compliance = { version = "0.9.0", path = "crates/kimberlite-compliance" }
+kimberlite-rbac = { version = "0.9.0", path = "crates/kimberlite-rbac" }
+kimberlite-abac = { version = "0.9.0", path = "crates/kimberlite-abac" }
+kimberlite-io = { version = "0.9.0", path = "crates/kimberlite-io" }
+kimberlite-oracle = { version = "0.9.0", path = "crates/kimberlite-oracle" }
+kimberlite-test-harness = { version = "0.9.0", path = "crates/kimberlite-test-harness" }
 
 # Maximum optimization for CLI binaries
 [profile.release-official]

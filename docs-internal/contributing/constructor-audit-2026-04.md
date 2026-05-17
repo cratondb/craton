@@ -51,13 +51,20 @@ Each site is assigned a bucket that drives the migration action:
 
 ## Wave 3 PR plan
 
-Bucket-C migration batches (one PR per crate, alphabetical within a wave):
+**Status: ✅ COMPLETE (v0.9.0 healthcare-pivot sweep)**
 
-1. **`kimberlite-cluster`** — 1 site (`ClusterConfig::new`)
-2. **`kimberlite-compliance`** — 1 site (`RecordSignature::new`)
-3. **`kimberlite-rbac`** — 1 site (`FieldMask::new`; plus Wave 2 `ColumnFilter` migration if not yet landed)
-4. **`kimberlite-server`** — 4 sites (`CoreRouter`, `CoreRuntime`, `BufferPool`, `BoundedQueue`). Largest blast radius — server startup paths touch all four.
-5. **`kimberlite-vsr`** — 3 sites (`Clock`, `VsrConfig`, `RepairState`). VSR is the highest-risk crate to change; land last and run full VOPR suite before merging.
+All 10 Bucket-C sites now have:
+- Paired `try_new() -> Result<_, Error>` fallible constructor with explicit error variants
+- Infallible `new()` shim marked `#[track_caller]` that delegates to `try_new().expect(...)` with a clear panic message pointing users at `try_new`
+- Tests for each rejection path (`try_new(...).unwrap_err()` matchers) plus `#[should_panic]` coverage on the `new()` shim
+
+Bucket-C migration batches:
+
+1. **`kimberlite-cluster`** — 1 site (`ClusterConfig::new`) ✅ shim + try_new + tests in `src/config.rs:77-102`, error tests at `try_new_rejects_zero_nodes`, `new_panics_on_zero_nodes`
+2. **`kimberlite-compliance`** — 1 site (`RecordSignature::new`) ✅ shim + try_new + tests in `src/signature_binding.rs:91-148`, error tests at `try_new_rejects_{empty_hash,empty_signer,wrong_signature_length}`, `new_panics_on_invalid_inputs`
+3. **`kimberlite-rbac`** — 1 site (`FieldMask::new`) ✅ shim + try_new + tests in `src/masking.rs:137-160`
+4. **`kimberlite-server`** — 4 sites (`CoreRouter`, `CoreRuntime`, `BufferPool`, `BoundedQueue`) ✅ all four migrated in `src/core_runtime.rs`, `buffer_pool.rs`, `bounded_queue.rs` with paired `try_new()` and `#[should_panic]` tests
+5. **`kimberlite-vsr`** — 3 sites (`Clock`, `VsrConfig`, `RepairState`) ✅ migrated in `src/clock.rs:293-323`, `src/config.rs:61-89`, `src/replica/repair.rs:68-98`. Error tests: `try_new_rejects_zero_cluster_size`, `try_new_rejects_replica_out_of_range`, `new_panics_on_zero_cluster_size`, `repair_state_try_new_rejects_{empty,inverted}_range`, `repair_state_new_panics_on_empty_range`
 
 ## Non-goals
 

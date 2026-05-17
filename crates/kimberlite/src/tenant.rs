@@ -5687,6 +5687,101 @@ mod tests {
         assert_eq!(query_result.rows[1][0], Value::BigInt(2));
     }
 
+    /// Notebar blocker N2 (notebar/docs/operating/kimberlite-upstream-queue.md).
+    /// `DELETE FROM <t>` with no WHERE must delete every row and report the
+    /// matched count back as `rows_affected`. Before the fix this was
+    /// silently a no-op that returned 0.
+    #[test]
+    fn test_delete_all_rows_no_where_clause() {
+        let dir = tempdir().unwrap();
+        let db = Kimberlite::open(dir.path()).unwrap();
+        let tenant = db.tenant(TenantId::new(1));
+
+        tenant
+            .execute(
+                "CREATE TABLE users (id BIGINT NOT NULL, age BIGINT NOT NULL, PRIMARY KEY (id))",
+                &[],
+            )
+            .unwrap();
+
+        tenant
+            .execute(
+                "INSERT INTO users (id, age) VALUES (1, 20), (2, 25), (3, 30), (4, 35), (5, 40)",
+                &[],
+            )
+            .unwrap();
+
+        let result = tenant.execute("DELETE FROM users", &[]).unwrap();
+        assert_eq!(
+            result.rows_affected(),
+            5,
+            "DELETE FROM users with no WHERE must report all 5 rows"
+        );
+
+        let count = tenant.query("SELECT COUNT(*) FROM users", &[]).unwrap();
+        assert_eq!(
+            count.rows[0][0],
+            Value::BigInt(0),
+            "DELETE FROM users with no WHERE must leave the table empty"
+        );
+    }
+
+    /// Notebar blocker N3 (notebar/docs/operating/kimberlite-upstream-queue.md).
+    /// After `DROP TABLE x; CREATE TABLE x ...` the pre-drop rows must not
+    /// reappear under the new catalog entry.
+    #[test]
+    fn test_drop_then_recreate_table_starts_empty() {
+        let dir = tempdir().unwrap();
+        let db = Kimberlite::open(dir.path()).unwrap();
+        let tenant = db.tenant(TenantId::new(1));
+
+        tenant
+            .execute(
+                "CREATE TABLE users (id BIGINT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (id))",
+                &[],
+            )
+            .unwrap();
+
+        tenant
+            .execute(
+                "INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob')",
+                &[],
+            )
+            .unwrap();
+
+        tenant.execute("DROP TABLE users", &[]).unwrap();
+
+        tenant
+            .execute(
+                "CREATE TABLE users (id BIGINT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (id))",
+                &[],
+            )
+            .unwrap();
+
+        let count = tenant.query("SELECT COUNT(*) FROM users", &[]).unwrap();
+        assert_eq!(
+            count.rows[0][0],
+            Value::BigInt(0),
+            "recreated table must start empty; pre-drop rows leaked"
+        );
+    }
+
+    /// Notebar blocker N4 (notebar/docs/operating/kimberlite-upstream-queue.md).
+    /// `DROP TABLE IF EXISTS missing` must succeed as a no-op rather than
+    /// returning TableNotFound.
+    #[test]
+    fn test_drop_table_if_exists_on_missing_table_is_noop() {
+        let dir = tempdir().unwrap();
+        let db = Kimberlite::open(dir.path()).unwrap();
+        let tenant = db.tenant(TenantId::new(1));
+
+        let result = tenant.execute("DROP TABLE IF EXISTS missing_table", &[]);
+        assert!(
+            result.is_ok(),
+            "DROP TABLE IF EXISTS on a missing table must be a no-op, got: {result:?}"
+        );
+    }
+
     #[test]
     fn test_insert_returning_single_row() {
         let dir = tempdir().unwrap();

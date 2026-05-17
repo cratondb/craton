@@ -20,16 +20,16 @@ It combines:
 - **Deterministic consensus** (VSR protocol)
 - **Hash-chained tamper-evidence** (like blockchain, without the blockchain)
 
-Target users: Healthcare systems, financial services, legal tech, and any domain requiring audit trails and compliance.
+Target users: Healthcare systems requiring HIPAA-grade audit trails — EHR/EMR, payer/RCM, clinical research, digital health.
 
 ### Who should use Kimberlite?
 
 **Ideal for:**
-- 🏥 Healthcare apps needing HIPAA compliance and audit trails
-- 🏛️ Legal tech requiring tamper-evident record keeping
-- 💰 Financial services with regulatory requirements (SOC 2, PCI DSS)
-- 🔬 Database researchers exploring immutable log architectures
-- 💻 Systems programmers learning deterministic design patterns
+- 🏥 EHR / EMR systems needing HIPAA compliance, FHIR R4, and tamper-evident audit
+- 💊 Payer / RCM platforms handling X12 837 claims and 835 remittance with audit-by-default
+- 🔬 Clinical research with IRB-aware retention, consent-bound queries, and Safe Harbor de-identification
+- 📱 Digital health / telehealth SaaS needing per-tenant encryption and BAA-ready audit chain
+- 💻 Database researchers and systems programmers exploring immutable log architectures
 
 **Not ideal for:**
 - High-frequency trading (latency-sensitive)

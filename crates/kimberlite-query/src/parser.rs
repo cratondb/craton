@@ -1378,8 +1378,9 @@ pub fn extract_at_offset(sql: &str) -> (String, Option<u64>) {
 /// both `AT OFFSET <n>` and the SQL:2011 temporal forms
 /// `FOR SYSTEM_TIME AS OF '<iso8601>'` and `AS OF '<iso8601>'`.
 ///
-/// AUDIT-2026-04 L-4 — healthcare / finance / legal verticals
-/// routinely ask "what did the record look like on date X?"
+/// AUDIT-2026-04 L-4 — healthcare workloads (subject-access, OCR
+/// review, payer dispute, malpractice litigation) routinely ask
+/// "what did the record look like on date X?"
 /// The offset form is compositional with Kimberlite's log-native
 /// storage; the timestamp form is the user-facing ergonomic. The
 /// caller resolves timestamps to offsets via the audit log's

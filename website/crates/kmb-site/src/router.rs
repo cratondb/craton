@@ -29,7 +29,6 @@ pub fn create_router(state: AppState) -> Router {
         .route("/architecture", get(handlers::architecture::architecture))
         .route("/faq", get(handlers::faq::faq))
         .route("/healthcare", get(handlers::healthcare::healthcare))
-        .route("/finance", get(handlers::finance::finance))
         .route("/blog", get(handlers::blog::blog_index))
         .route("/blog/{slug}", get(handlers::blog::blog_post))
         // Documentation routes (dynamic from markdown)

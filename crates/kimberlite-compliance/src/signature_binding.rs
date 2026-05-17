@@ -268,6 +268,70 @@ mod tests {
     }
 
     #[test]
+    fn try_new_rejects_empty_hash() {
+        let err = RecordSignature::try_new(
+            "sig-001".to_string(),
+            vec![],
+            "dr-smith".to_string(),
+            SignatureMeaning::Authorship,
+            Utc::now(),
+            vec![0u8; 64],
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, SignatureBindingError::EmptyHash),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn try_new_rejects_empty_signer() {
+        let err = RecordSignature::try_new(
+            "sig-001".to_string(),
+            vec![1, 2, 3, 4],
+            String::new(),
+            SignatureMeaning::Authorship,
+            Utc::now(),
+            vec![0u8; 64],
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, SignatureBindingError::EmptySigner),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn try_new_rejects_wrong_signature_length() {
+        let err = RecordSignature::try_new(
+            "sig-001".to_string(),
+            vec![1, 2, 3, 4],
+            "dr-smith".to_string(),
+            SignatureMeaning::Authorship,
+            Utc::now(),
+            vec![0u8; 32], // Not 64
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, SignatureBindingError::WrongSignatureLength { got: 32 }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid inputs")]
+    fn new_panics_on_invalid_inputs() {
+        let _ = RecordSignature::new(
+            "sig-001".to_string(),
+            vec![], // Empty hash → panic via try_new
+            "dr-smith".to_string(),
+            SignatureMeaning::Authorship,
+            Utc::now(),
+            vec![0u8; 64],
+        );
+    }
+
+    #[test]
     fn test_signature_meaning_display() {
         assert_eq!(SignatureMeaning::Authorship.to_string(), "Authorship");
         assert_eq!(SignatureMeaning::Review.to_string(), "Review");

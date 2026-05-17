@@ -103,7 +103,7 @@ pub fn parse(bytes: &[u8]) -> Result<Message, ParseError> {
         if b == SEGMENT_TERMINATOR || b == b'\n' {
             let raw = &bytes[segment_start..i];
             if !raw.is_empty() {
-                segments.push(parse_segment(raw, &encoding)?);
+                segments.push(parse_segment(raw, encoding)?);
             }
             // Skip both bytes if `\r\n`.
             if b == b'\r' && bytes.get(i + 1) == Some(&b'\n') {
@@ -120,14 +120,14 @@ pub fn parse(bytes: &[u8]) -> Result<Message, ParseError> {
     if segment_start < bytes.len() {
         let raw = &bytes[segment_start..];
         if !raw.is_empty() {
-            segments.push(parse_segment(raw, &encoding)?);
+            segments.push(parse_segment(raw, encoding)?);
         }
     }
 
     Ok(Message { encoding, segments })
 }
 
-fn parse_segment(raw: &[u8], encoding: &Encoding) -> Result<Segment, ParseError> {
+fn parse_segment(raw: &[u8], encoding: Encoding) -> Result<Segment, ParseError> {
     // The first three bytes are the segment name (e.g. "MSH", "PID").
     if raw.len() < 3 {
         return Err(ParseError::InvalidSegmentName {
@@ -138,7 +138,7 @@ fn parse_segment(raw: &[u8], encoding: &Encoding) -> Result<Segment, ParseError>
     // Per HL7 v2, the first character must be a letter; the remaining
     // two can be letters or digits (PV1, OBX, OBR, NK1, etc.).
     if !name_bytes[0].is_ascii_alphabetic()
-        || !name_bytes[1..].iter().all(|b| b.is_ascii_alphanumeric())
+        || !name_bytes[1..].iter().all(u8::is_ascii_alphanumeric)
     {
         return Err(ParseError::InvalidSegmentName {
             found: String::from_utf8_lossy(name_bytes).into_owned(),
@@ -173,17 +173,13 @@ fn parse_segment(raw: &[u8], encoding: &Encoding) -> Result<Segment, ParseError>
         // separator (if there are more fields) or the segment end.
         if !remaining.is_empty() {
             // Skip the leading field separator.
-            let from = if remaining[0] == encoding.field { 1 } else { 0 };
+            let from = usize::from(remaining[0] == encoding.field);
             parse_field_list(&remaining[from..], encoding, &mut fields);
         }
     } else {
         // Non-MSH: bytes after the name are `<field_sep>field1<field_sep>field2...`.
         if !after_name.is_empty() {
-            let from = if after_name[0] == encoding.field {
-                1
-            } else {
-                0
-            };
+            let from = usize::from(after_name[0] == encoding.field);
             parse_field_list(&after_name[from..], encoding, &mut fields);
         }
     }
@@ -191,7 +187,7 @@ fn parse_segment(raw: &[u8], encoding: &Encoding) -> Result<Segment, ParseError>
     Ok(Segment { name, fields })
 }
 
-fn parse_field_list(bytes: &[u8], encoding: &Encoding, out: &mut Vec<Field>) {
+fn parse_field_list(bytes: &[u8], encoding: Encoding, out: &mut Vec<Field>) {
     if bytes.is_empty() {
         return;
     }
@@ -200,7 +196,7 @@ fn parse_field_list(bytes: &[u8], encoding: &Encoding, out: &mut Vec<Field>) {
     }
 }
 
-fn parse_field(bytes: &[u8], encoding: &Encoding) -> Field {
+fn parse_field(bytes: &[u8], encoding: Encoding) -> Field {
     if bytes.is_empty() {
         return Field {
             repetitions: vec![Repetition::default()],
@@ -216,7 +212,7 @@ fn parse_field(bytes: &[u8], encoding: &Encoding) -> Field {
     Field { repetitions }
 }
 
-fn parse_repetition(bytes: &[u8], encoding: &Encoding) -> Repetition {
+fn parse_repetition(bytes: &[u8], encoding: Encoding) -> Repetition {
     if bytes.is_empty() {
         return Repetition::default();
     }
@@ -227,7 +223,7 @@ fn parse_repetition(bytes: &[u8], encoding: &Encoding) -> Repetition {
     Repetition { components }
 }
 
-fn parse_component(bytes: &[u8], encoding: &Encoding) -> Component {
+fn parse_component(bytes: &[u8], encoding: Encoding) -> Component {
     let mut subcomponents = Vec::new();
     for raw_sub in split_top(bytes, encoding.subcomponent) {
         subcomponents.push(Subcomponent {

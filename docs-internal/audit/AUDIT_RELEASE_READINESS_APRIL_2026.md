@@ -58,16 +58,16 @@ Methodology note: exploration agents produce a trustworthy first pass; every rel
 | DML: INSERT/UPDATE/DELETE/SELECT, DDL: CREATE/ALTER TABLE, aggregates, GROUP BY, HAVING, UNION, INNER/LEFT JOIN, CTEs, subqueries | `crates/kimberlite-query/src/parser.rs`, `executor.rs` — 85+ tests |
 | Window functions: ROW_NUMBER, RANK, DENSE_RANK, LAG, LEAD, FIRST_VALUE, LAST_VALUE | `crates/kimberlite-query/src/window.rs` (S3.2, commit `fd7fce2`) |
 | AsyncClient (Rust tokio + sans-I/O framing) | `crates/kimberlite-client/src/async_client.rs` (S2.1, commit `f4a8f8a`) |
-| Multi-tenant isolation with cryptographic boundaries | `crates/kimberlite-directory/src/lib.rs` + `e2e_finance.rs` |
+| Multi-tenant isolation with cryptographic boundaries | `crates/kimberlite-directory/src/lib.rs` + `e2e_healthcare.rs` |
 | RBAC (4 roles + row/column filter) | `crates/kimberlite-rbac/src/` |
-| ABAC (12 condition types + HIPAA/FedRAMP/PCI prebuilts) | `crates/kimberlite-abac/src/` |
+| ABAC (12 condition types + HIPAA TPO + break-glass prebuilts) | `crates/kimberlite-abac/src/` |
 | Field-level masking (5 strategies) | `crates/kimberlite-crypto/src/field.rs` |
 | Consent management (8 purposes, kernel-enforced) | `crates/kimberlite-compliance/src/consent.rs` |
 | Right to Erasure (GDPR Art. 17; 30-day deadlines, exemptions) | `crates/kimberlite-compliance/src/erasure.rs` |
 | JWT + API-key auth with rotation | `crates/kimberlite-server/src/auth.rs` |
 | Dual-hash crypto (SHA-256 + BLAKE3), compile-time `HashPurpose` boundary | `crates/kimberlite-crypto/src/hash.rs` |
 | FCIS (pure kernel, IO at shell) | `crates/kimberlite-kernel/src/` — no IO/clock/random in `apply_committed()` |
-| Healthcare + finance E2E against in-process server | `crates/kimberlite-client/tests/e2e_{healthcare,finance}.rs` (S3.7, commit `68d4ddf`) |
+| Healthcare E2E against in-process server | `crates/kimberlite-client/tests/e2e_healthcare.rs` (S3.7, commit `68d4ddf`; finance E2E removed in healthcare pivot) |
 | Audit wire v3 + cross-SDK parity | commit `4e817b1` (S4.\*) |
 
 #### Partial — scaffolded, not end-to-end

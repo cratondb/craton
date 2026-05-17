@@ -15,8 +15,106 @@ user-facing narrative.
 
 ## [Unreleased]
 
-_Accretion slot for v0.9.0 work. See [`ROADMAP.md`](./ROADMAP.md)
-for planned scope._
+_Accretion slot for v0.10.0 work. See [`ROADMAP.md`](./ROADMAP.md)
+for planned scope (Firecracker/KVM multi-node DST, KMS production
+backends, geo-fencing enforcement, full X12 837 loop schemas)._
+
+## [0.9.0] — 2026-05-18
+
+The healthcare-only release. Kimberlite is no longer positioned as a
+generic compliance database — every primitive is now sized to HIPAA,
+with GDPR / SOC 2 / ISO 27001 / FedRAMP as overlay frameworks for
+healthcare SaaS that need them.
+
+### Healthcare pivot — release sweep (v0.9.0 cut)
+
+The Q1 (FHIR R4 + SMART-on-FHIR), Q2 (HL7 v2 + cluster HA), and Q3
+(Safe Harbor de-id + KMS + X12 + pediatric retention) chapters of the
+healthcare pivot all land in v0.9.0. Plus the release-sweep additions
+listed below.
+
+- **Pivot cleanup (L1–L10).** Purged finance/legal/government framing
+  from the live website (deleted `/finance` route, handler, and
+  template; rewrote the TigerBeetle and PostgreSQL comparison pages
+  to healthcare-only positioning); README "Use Cases" section now
+  lists EHR / payer-RCM / clinical research / digital health;
+  `quick-start.md` and `cli.md` template list now offers `ehr` /
+  `claims` / `research` / `multi-tenant` instead of finance/legal;
+  `docs/concepts/data-classification.md`,
+  `docs/concepts/compliance-implementation.md`, `docs/start.md`,
+  `docs/reference/faq.md`,
+  `docs/compliance/certification-package.md`,
+  `docs/operating/production-deployment.md`,
+  `docs/operating/configuration.md`, `docs/operating/security.md`,
+  `docs/internals/compliance-implementation.md`,
+  `docs/reference/sql/json.md`,
+  `docs/internals/compliance/traceability-matrix.md`, and the SDK
+  package description all moved to HIPAA-native framing with explicit
+  out-of-scope flags on SOX/GLBA/FERPA/CMMC/NIS2/DORA/eIDAS/IRAP/PCI
+  DSS frameworks (specs retained for historical reference).
+- **PRESSURECRAFT Wave 3 (`try_new`) migration complete.** All 10
+  Bucket-C panicking `pub fn new()` sites identified in
+  `docs-internal/contributing/constructor-audit-2026-04.md` now ship
+  paired `try_new() -> Result<_, Error>` constructors with explicit
+  error variants and `#[track_caller]` shim `new()` methods. Affected
+  sites: `ClusterConfig` (cluster), `RecordSignature` (compliance),
+  `FieldMask` (rbac), `CoreRouter` / `CoreRuntime` / `BufferPool` /
+  `BoundedQueue` (server), `Clock` / `VsrConfig` / `RepairState`
+  (vsr). Each rejection path now has dedicated tests
+  (`try_new_rejects_*` + `#[should_panic]` `new_panics_on_*`).
+- **Healthcare VOPR scenarios promoted.** 6 clinical scenarios that
+  previously delegated to the v0.7.0 `aspirational_v07` scaffold now
+  have real fault-shape drivers in `crates/kimberlite-sim/src/scenarios.rs`:
+  `ehr_admissions_surge`, `lab_result_delayed_delivery`,
+  `claims_batch_reconciliation`, `break_glass_under_load`,
+  `consent_revocation_cascade`, `as_of_before_retention_horizon`.
+  Each tunes its NetworkConfig / StorageConfig / SwizzleClogger /
+  GrayFailureInjector to the canary contract documented on the
+  scenario's `ScenarioType` variant. New
+  `test_healthcare_scenarios_have_real_drivers` integration check
+  enforces graduation.
+- **4 new fuzz targets** added under `fuzz/fuzz_targets/`:
+  `fuzz_fhir_r4_resource` (FHIR R4 Patient/Bundle JSON parser +
+  canonical round-trip), `fuzz_x12_envelope` (X12 EDI parser
+  no-panic-on-input), `fuzz_deid_safe_harbor` (HIPAA Safe Harbor
+  de-id + attestation round-trip), `fuzz_audit_export_roundtrip`
+  (RecordSignature canonical postcard round-trip). Wired into
+  `.github/workflows/fuzz.yml` for the nightly campaign.
+- **`Healthcare.tla` spec** — new formal-verification module with 4
+  healthcare-specific invariants: `SafeHarborCoverage`
+  (§164.514(b)(2)), `BreakGlassAuditOrder` (§164.510(b)(3)),
+  `ConsentRevocationCausality`, `NoPhiReadAfterRevocation`. Layered
+  on top of the existing `Compliance.tla` and gated in
+  `.github/workflows/formal-verification.yml`.
+- **Notebar upstream-blocker regression tests** — three in-process
+  tenant.rs tests guard against regressions on the four issues
+  notebar previously had `describe.skip`'d (N1 tenant-scoped table
+  catalog already fixed in `kimberlite@89d3bd6`; N2 DELETE-without-WHERE,
+  N3 DROP-leaves-rows, N4 DROP-IF-EXISTS confirmed already fixed and
+  guarded with `test_delete_all_rows_no_where_clause`,
+  `test_drop_then_recreate_table_starts_empty`,
+  `test_drop_table_if_exists_on_missing_table_is_noop`).
+
+### Changed
+
+- TypeScript SDK package description updated from "compliance-first
+  database for regulated industries" to "verifiable database for
+  healthcare".
+- Workspace version bumped to 0.9.0; TS SDK at
+  `@kimberlitedb/client@0.9.0`.
+
+### Out of scope (tracked for v0.10.0)
+
+- Firecracker / KVM-based multi-node DST harness on Hetzner EPYC
+  (current in-process VOPR + `kimberlite-cluster` integration tests
+  remain the v0.9 correctness foundation).
+- Geo-fencing / data-sovereignty enforcement (`PlacementPolicy` API
+  surface exists; the enforcement layer is v0.10).
+- KMS production backends (AWS KMS, Azure Key Vault, GCP KMS). The
+  trait exists; file-backed dev provider is the v0.9 default.
+- Full X12 837 claim-loop schemas (837P/837I/837D with 1000+ segment
+  loops). v0.9 ships envelope-and-segment-iterator only — sufficient
+  for ingest + audit-event emission. Deep loop modelling is v0.11.
 
 ### Added — Healthcare pivot Q3 (de-id, KMS, X12, pediatric retention)
 

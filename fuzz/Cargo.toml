@@ -60,6 +60,26 @@ path = "../crates/kimberlite-abac"
 [dependencies.kimberlite-types]
 path = "../crates/kimberlite-types"
 
+# Healthcare-pivot Q3 fuzz targets. fhir/x12/compliance carry the
+# clearinghouse-supplied byte inputs that the third-party-input fuzz
+# surface targets — see fuzz_fhir_r4_resource, fuzz_x12_envelope,
+# fuzz_deid_safe_harbor, fuzz_audit_export_roundtrip.
+[dependencies.kimberlite-fhir]
+path = "../crates/kimberlite-fhir"
+
+[dependencies.kimberlite-x12]
+path = "../crates/kimberlite-x12"
+
+[dependencies.kimberlite-compliance]
+path = "../crates/kimberlite-compliance"
+
+[dependencies.serde_json]
+version = "1"
+
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+
 [dependencies.sqlparser]
 version = "0.61"
 
@@ -232,6 +252,50 @@ bench = false
 # the same Value (determinism check).
 name = "fuzz_scalar_expr"
 path = "fuzz_targets/fuzz_scalar_expr.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+# Healthcare-pivot Q3 — FHIR R4 resource parser. Drives arbitrary
+# bytes through serde_json::from_slice<Patient/Bundle> + canonical
+# round-trip determinism. Closes the FHIR ingest surface that today
+# has no fuzz coverage.
+name = "fuzz_fhir_r4_resource"
+path = "fuzz_targets/fuzz_fhir_r4_resource.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+# Healthcare-pivot Q3 — X12 EDI envelope parser. Drives arbitrary
+# bytes through kimberlite_x12::parser::parse(). The X12 path
+# receives clearinghouse-supplied bytes; no-panic-on-input is the
+# core invariant.
+name = "fuzz_x12_envelope"
+path = "fuzz_targets/fuzz_x12_envelope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+# Healthcare-pivot Q3 — HIPAA Safe Harbor de-identification (45 CFR
+# §164.514(b)(2)). Drives arbitrary JSON through
+# deidentify_and_attest with the default Safe Harbor rule set;
+# verifies no panic + attestation hash round-trip stability.
+name = "fuzz_deid_safe_harbor"
+path = "fuzz_targets/fuzz_deid_safe_harbor.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+# Healthcare-pivot Q3 — audit-log signature canonical round-trip.
+# Drives arbitrary bytes through RecordSignature::try_new + postcard
+# round-trip. The audit chain hash relies on byte-stable canonical
+# encoding; this target keeps pressure on that invariant.
+name = "fuzz_audit_export_roundtrip"
+path = "fuzz_targets/fuzz_audit_export_roundtrip.rs"
 test = false
 doc = false
 bench = false

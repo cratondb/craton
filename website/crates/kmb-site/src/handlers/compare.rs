@@ -28,8 +28,8 @@ fn postgresql_data() -> ComparisonData {
         competitor_best_for: "General-purpose OLTP/OLAP, broad ecosystem, mature tooling, \
                               traditional relational workloads"
             .to_string(),
-        kimberlite_best_for: "Regulated industries requiring immutable audit trails, \
-                              formal compliance verification, and cryptographic integrity"
+        kimberlite_best_for: "Healthcare workloads requiring immutable audit trails, \
+                              HIPAA-grade compliance, and cryptographic PHI integrity"
             .to_string(),
         competitor_use_cases: vec![
             UseCase {
@@ -47,12 +47,12 @@ fn postgresql_data() -> ComparisonData {
         ],
         kimberlite_use_cases: vec![
             UseCase {
-                title: "Audit-critical data".to_string(),
-                detail: "Healthcare records, financial transactions, legal evidence".to_string(),
+                title: "Audit-critical PHI".to_string(),
+                detail: "Patient records, clinical notes, claims, prescriptions, lab results".to_string(),
             },
             UseCase {
                 title: "Compliance by construction".to_string(),
-                detail: "23 frameworks formally verified, not bolted on after the fact"
+                detail: "HIPAA Safe Harbor + audit chain formally verified, not bolted on"
                     .to_string(),
             },
             UseCase {
@@ -77,7 +77,7 @@ fn postgresql_data() -> ComparisonData {
             ComparisonRow {
                 feature: "Compliance frameworks".to_string(),
                 competitor_value: "Manual configuration per framework".to_string(),
-                kimberlite_value: "23 frameworks formally verified (92 proofs)".to_string(),
+                kimberlite_value: "HIPAA-native; GDPR/SOC2/ISO-27001 overlays — 92 TLAPS proofs".to_string(),
                 kimberlite_advantage: true,
             },
             ComparisonRow {
@@ -144,14 +144,14 @@ fn tigerbeetle_data() -> ComparisonData {
         tagline: "Shared DNA, different missions.".to_string(),
         intro: "TigerBeetle and Kimberlite share design philosophy: deterministic simulation \
                 testing, immutable logs, and formal verification approaches. TigerBeetle is a \
-                purpose-built financial accounting database. Kimberlite is a general-purpose \
-                compliance database for any regulated industry."
+                purpose-built financial accounting database. Kimberlite is a verifiable database \
+                for healthcare — EHR/EMR systems, payer-RCM, clinical research, digital health."
             .to_string(),
         competitor_best_for: "High-throughput double-entry accounting, financial ledgers, \
                               payment processing"
             .to_string(),
-        kimberlite_best_for: "Any regulated data across healthcare, finance, legal, government, \
-                              education, and defense"
+        kimberlite_best_for: "PHI-bearing healthcare workloads: EHR/EMR, payer/RCM claims, \
+                              clinical research, digital health, hospital operations"
             .to_string(),
         competitor_use_cases: vec![
             UseCase {
@@ -169,16 +169,16 @@ fn tigerbeetle_data() -> ComparisonData {
         ],
         kimberlite_use_cases: vec![
             UseCase {
-                title: "Any regulated data".to_string(),
-                detail: "Healthcare, legal, government, education, defense, pharma".to_string(),
+                title: "Healthcare-native data".to_string(),
+                detail: "FHIR R4 resources, HL7 v2 messages, X12 837 claims, audit-by-default".to_string(),
             },
             UseCase {
                 title: "Full SQL queries".to_string(),
                 detail: "SELECT, JOIN, CTE, aggregates, GROUP BY, HAVING, UNION".to_string(),
             },
             UseCase {
-                title: "23 compliance frameworks".to_string(),
-                detail: "HIPAA, GDPR, SOX, PCI DSS, FedRAMP, and 18 more".to_string(),
+                title: "HIPAA-grade compliance".to_string(),
+                detail: "Safe Harbor de-identification, BAA-ready audit chain, GDPR overlay".to_string(),
             },
         ],
         rows: vec![
@@ -197,14 +197,14 @@ fn tigerbeetle_data() -> ComparisonData {
             ComparisonRow {
                 feature: "Industry coverage".to_string(),
                 competitor_value: "Finance only".to_string(),
-                kimberlite_value: "Healthcare, finance, legal, government, education, pharma"
+                kimberlite_value: "Healthcare-first: EHR, payer/RCM, clinical research, digital health"
                     .to_string(),
                 kimberlite_advantage: true,
             },
             ComparisonRow {
-                feature: "Compliance frameworks".to_string(),
+                feature: "Compliance".to_string(),
                 competitor_value: "None built-in".to_string(),
-                kimberlite_value: "23 frameworks formally verified".to_string(),
+                kimberlite_value: "HIPAA-native; GDPR/SOC2/ISO-27001 overlays".to_string(),
                 kimberlite_advantage: true,
             },
             ComparisonRow {
@@ -250,11 +250,12 @@ fn tigerbeetle_data() -> ComparisonData {
                                         extreme performance through io_uring and a purpose-built \
                                         binary protocol. Not designed for general-purpose queries."
             .to_string(),
-        architecture_right_title: "Kimberlite: Compliance Database".to_string(),
-        architecture_right_description: "Kimberlite is a general-purpose database for any \
-                                         regulated data. User-defined schemas, full SQL, 23 \
-                                         compliance frameworks, and multi-tenant isolation. \
-                                         Designed for auditability across all industries."
+        architecture_right_title: "Kimberlite: Healthcare Database".to_string(),
+        architecture_right_description: "Kimberlite is a verifiable database built for healthcare. \
+                                         User-defined schemas, full SQL, FHIR R4 + HL7 v2 + X12 \
+                                         native types, HIPAA-grade audit chain, and per-tenant \
+                                         encryption. Designed for auditability that holds up under \
+                                         OCR review, payer dispute, and patient subject-access requests."
             .to_string(),
     }
 }
@@ -272,8 +273,8 @@ fn cockroachdb_data() -> ComparisonData {
         competitor_best_for: "Geo-distributed applications, PostgreSQL compatibility at global \
                               scale, high availability"
             .to_string(),
-        kimberlite_best_for: "Regulated industries requiring immutable audit trails, formal \
-                              compliance proofs, and cryptographic data integrity"
+        kimberlite_best_for: "Healthcare workloads requiring immutable audit trails, HIPAA-grade \
+                              compliance, and cryptographic PHI integrity"
             .to_string(),
         competitor_use_cases: vec![
             UseCase {
@@ -296,7 +297,7 @@ fn cockroachdb_data() -> ComparisonData {
             },
             UseCase {
                 title: "Formal compliance proofs".to_string(),
-                detail: "92 TLAPS proofs across 23 regulatory frameworks".to_string(),
+                detail: "92 TLAPS proofs covering HIPAA and overlay frameworks (GDPR/SOC2/ISO-27001)".to_string(),
             },
             UseCase {
                 title: "True open source".to_string(),
@@ -319,7 +320,7 @@ fn cockroachdb_data() -> ComparisonData {
             ComparisonRow {
                 feature: "Compliance frameworks".to_string(),
                 competitor_value: "Manual configuration".to_string(),
-                kimberlite_value: "23 frameworks formally verified (92 proofs)".to_string(),
+                kimberlite_value: "HIPAA-native; GDPR/SOC2/ISO-27001 overlays — 92 TLAPS proofs".to_string(),
                 kimberlite_advantage: true,
             },
             ComparisonRow {

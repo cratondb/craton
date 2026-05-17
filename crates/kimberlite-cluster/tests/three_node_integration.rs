@@ -11,8 +11,8 @@
 //!   2. `leader_kill_elects_new_leader_and_old_leader_rejoins`
 //!   3. `leader_kill_flips_follower_readyz_within_5s`
 //!   4. `single_node_restart_preserves_writes`
-//!     (deferred: rolling-restart-of-all-3 — see comment on the
-//!     scenario for the cluster-stability limitation it surfaces)
+//!      (deferred: rolling-restart-of-all-3 — see comment on the
+//!      scenario for the cluster-stability limitation it surfaces)
 //!
 //! All `#[ignore]`d by default — they spawn real binaries and consume
 //! ports + disk. Run with:

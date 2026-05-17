@@ -122,7 +122,7 @@ Output:
 
 ## Try Compliance Features
 
-Kimberlite is built for regulated industries. Here are some compliance features you can try right now.
+Kimberlite is built for healthcare. Here are some compliance features you can try right now.
 
 ### Data Masking (HIPAA-Compliant)
 
@@ -252,15 +252,15 @@ SELECT * FROM _kimberlite_audit WHERE table_name = 'patients';
 
 ## What Makes Kimberlite Different?
 
-Traditional databases bolt on compliance features as afterthoughts. Kimberlite is built from the ground up for regulated industries:
+Traditional databases bolt on compliance features as afterthoughts. Kimberlite is built from the ground up for healthcare:
 
-- **23 compliance frameworks** - HIPAA, SOX, GDPR, PCI-DSS, and 19 more
-- **Append-only architecture** - Nothing is ever deleted, perfect audit trails
+- **HIPAA-native** - Privacy + Security + Breach Notification Rules modeled in TLA+; Safe Harbor de-identification covers all 18 §164.514(b)(2) identifiers; overlays compose for GDPR / SOC 2 / ISO 27001 / FedRAMP
+- **Append-only architecture** - Nothing is ever deleted, perfect audit trails (HIPAA §164.530(j)(2): 6 years; pediatric: until age of majority + 7)
 - **Built-in data classification** - PHI, PII, PCI automatically tagged
-- **Time-travel queries** - Query any historical state
+- **Time-travel queries** - Query any historical state (subject-access, OCR review, payer dispute, malpractice litigation)
 - **Field-level masking** - Selective redaction of sensitive data
 - **Formal verification** - Safety properties proven with TLA+, Coq, and Alloy
-- **Multi-tenant isolation** - Complete data separation per tenant
+- **Multi-tenant isolation** - Complete PHI separation per clinic / payer / sponsor
 
 ## Next Steps
 

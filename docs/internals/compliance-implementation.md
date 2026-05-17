@@ -7,7 +7,7 @@ order: 9
 
 # Compliance Architecture
 
-Kimberlite is designed for any industry where data integrity, auditability, and provable correctness are non-negotiable. Whether you're in healthcare, finance, legal, government, or any other regulated field, this document describes the compliance-related architecture: audit trails, cryptographic guarantees, encryption, and regulatory support.
+Kimberlite is built for healthcare workloads — EHR/EMR, payer/RCM, clinical research, digital health — where data integrity, auditability, and provable correctness are non-negotiable for HIPAA compliance, BAA fulfillment, and patient subject-access requests. This document describes the compliance-related architecture: audit trails, cryptographic guarantees, encryption, and regulatory support (HIPAA-native; GDPR / SOC 2 / ISO 27001 as overlay frameworks).
 
 ---
 
@@ -46,19 +46,19 @@ Kimberlite provides **compliance by construction**, not compliance by configurat
 
 ### Supported Frameworks
 
-Kimberlite's architecture supports compliance with multiple regulatory frameworks:
+Kimberlite is HIPAA-native — the architecture, types, and audit chain are designed around the Privacy Rule, Security Rule, and Breach Notification Rule. Other frameworks below are overlays whose requirements compose with HIPAA when an operator opts in.
 
-| Framework | Industry | Key Requirements | Kimberlite Support |
-|-----------|----------|------------------|------------------|
-| **HIPAA** | Healthcare | Audit trails, access controls, encryption | Full |
-| **GDPR** | All (EU) | Right to erasure, data portability, consent | Full |
-| **SOC 2** | Technology | Security, availability, processing integrity | Full |
-| **21 CFR Part 11** | Pharma/Medical Devices | Electronic records, signatures, timestamps | Full |
-| **CCPA** | All (California) | Data access, deletion, opt-out | Full |
-| **GLBA** | Finance | Data protection, access controls | Full |
-| **FERPA** | Education | Student data privacy, access controls | Full |
+| Framework | Role | Key Requirements | Kimberlite Support |
+|-----------|------|------------------|------------------|
+| **HIPAA** | Native | Audit trails, access controls, encryption, Safe Harbor de-id, BAA | Full |
+| **21 CFR Part 11** | Native | Electronic records, signatures, timestamps (clinical research) | Full |
+| **HITECH** | Native | Breach notification, audit log integrity | Full |
+| **GDPR** | Overlay | Right to erasure, data portability, consent (EU patients) | Full |
+| **SOC 2** | Overlay | Security, availability, processing integrity | Full |
+| **ISO 27001** | Overlay | ISMS, risk management, access controls | Full |
+| **CCPA / CPRA** | Overlay | Subject access, deletion, opt-out (California patients) | Full |
 
-The same architectural primitives—immutable logs, hash chaining, encryption, and audit trails—provide the foundation for compliance across all frameworks.
+The same architectural primitives—immutable logs, hash chaining, encryption, and audit trails—satisfy HIPAA outright and compose with overlay frameworks when needed.
 
 ---
 
@@ -904,12 +904,12 @@ match purpose {
 
 ### Why This Approach?
 
-Kimberlite is designed for regulated industries where FIPS compliance is non-negotiable:
+Kimberlite serves healthcare customers — many of whom (HHS / VA / DoD covered entities, federal contractors handling PHI) require FIPS 140-3 validated cryptography:
 
-1. **Clear boundary**: Compliance paths use FIPS; internal paths may use faster algorithms
-2. **Audit simplicity**: Auditors see FIPS algorithms for all external-facing operations
-3. **Veritaserum alignment**: "Simplicity is security" within each boundary
-4. **Customer reality**: Healthcare, finance, and federal customers require FIPS for auditable data
+1. **Clear boundary**: Compliance paths use FIPS-validated primitives; internal hot paths may use faster algorithms
+2. **Audit simplicity**: Auditors see FIPS algorithms for all external-facing operations (audit chain, signed exports, BAA-bearing endpoints)
+3. **Pressurecraft alignment**: "Simplicity is security" within each boundary
+4. **Customer reality**: Federal-touching healthcare (VA, IHS, DoD MTFs, federal-contractor clinics) require FIPS-validated crypto for PHI
 
 ### Regulatory Framework Compliance
 

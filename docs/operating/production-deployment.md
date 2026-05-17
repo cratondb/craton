@@ -8,8 +8,8 @@ order: 2
 # Production Deployment Guide
 
 **Target Audience:** DevOps Engineers, SREs, Platform Teams
-**Use Case:** Production deployment for regulated industries (healthcare, finance, government)
-**Compliance Focus:** HIPAA, GDPR, SOC 2, PCI DSS, ISO 27001, FedRAMP
+**Use Case:** Production deployment for healthcare SaaS (EHR/EMR, payer/RCM, clinical research, digital health)
+**Compliance Focus:** HIPAA (Privacy + Security + Breach Notification), with GDPR / SOC 2 / ISO 27001 overlays
 
 ---
 
@@ -31,7 +31,7 @@ order: 2
 
 ## Overview
 
-**Kimberlite** is a compliance-first database designed for regulated industries, with a multi-layer verification stack. This guide covers production-grade deployment with emphasis on:
+**Kimberlite** is a verifiable database for healthcare, with a multi-layer verification stack. This guide covers production-grade deployment with emphasis on:
 
 1. **Verification:** ~91 Kani proofs (PR-gated), ~25 TLA+ core theorems (TLC PR-gated; TLAPS nightly), Coq crypto proofs, 74 VOPR scenario variants (~50 substantive)
 2. **Compliance substrate:** HIPAA-aligned (audit trail, encryption, access control, retention), SOC 2-aligned (monitoring, change management, logical access), GDPR-aligned (Art. 17 erasure, Art. 20 portability, Art. 6/7 consent), PCI DSS-aligned (encryption, key management). **Kimberlite ships the primitives that enable these compliance regimes; no third-party audits or attestations have been completed as of v0.8** — SOC 2 Type II, HIPAA attestation, and FedRAMP authorization are ROADMAP.md v1.0 gates.

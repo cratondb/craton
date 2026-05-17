@@ -28,7 +28,7 @@ Kimberlite is a verifiable, durable database engine designed for environments wh
 
 ## Why Kimberlite?
 
-**The compliance tax is real.** In regulated industries, you're forced to build:
+**The compliance tax is real.** In healthcare, you're forced to build:
 - Immutable audit trails for every change
 - Cryptographic proof of data integrity
 - Per-tenant encryption and isolation
@@ -130,18 +130,18 @@ just pre-commit     # Run before committing
 - ✅ **Column-level masking policies** - `CREATE MASKING POLICY` DDL composes with RBAC + break-glass
 - ✅ **Tamper-evidence** - CRC32 checksums + hash chains detect corruption
 - ✅ **Viewstamped Replication (VSR)** - Full multi-node consensus (Normal, ViewChange, Recovery, Repair, StateTransfer, Reconfiguration)
-- ✅ **RBAC/ABAC enforcement** - Per-role row/column filters; HIPAA, FedRAMP, PCI pre-built policies
+- ✅ **RBAC/ABAC enforcement** - Per-role row/column filters; HIPAA TPO + break-glass policies built-in
 - ✅ **Security hardened** - pre-launch audit completed; message signatures, replay protection, DoS limits, zero unallowed RustSec advisories
 
 See [`CHANGELOG.md`](CHANGELOG.md) for per-release detail; [`ROADMAP.md`](ROADMAP.md) for what's next.
 
 ## Use Cases
 
-Kimberlite is designed for:
-- Healthcare (EHR, clinical data, HIPAA)
-- Financial services (audit trails, transaction records)
-- Legal systems (chain of custody, evidence)
-- Government (regulated records, compliance)
+Kimberlite is built for healthcare:
+- **EHR / EMR systems** — patient records, clinical notes, encounters with FHIR R4 and HL7 v2 native types
+- **Payer / RCM** — X12 837 claim ingestion, 835 remittance reconciliation, audit-by-default
+- **Clinical research** — IRB-aware retention, consent-bound queries, Safe Harbor de-identification for secondary use
+- **Digital health** — multi-tenant SaaS with per-tenant encryption and BAA-ready audit chain
 
 ## Examples
 
@@ -228,7 +228,7 @@ See [`ROADMAP.md`](ROADMAP.md) for the full list of in-flight and deferred items
 
 ## Compliance posture
 
-**Kimberlite ships the cryptographic and architectural primitives that HIPAA, SOC 2, FedRAMP, GDPR, PCI DSS, and ISO 27001 demand:** hash-chained immutable audit log (server-walked attestation via `audit.verifyChain()`), AES-256-GCM at rest, Ed25519 signed exports, multi-tenant key isolation, GDPR Article 17 erasure orchestration with `requestId` correlation, GDPR Article 6 consent-basis tracking on the wire, column-level masking policies that compose with RBAC + break-glass, and 23 frameworks formally modelled (TLA+ + Coq + Kani + VOPR scenarios) — see [`docs/compliance/certification-package.md`](docs/compliance/certification-package.md).
+**Kimberlite ships the cryptographic and architectural primitives that HIPAA demands, with GDPR / SOC 2 / ISO 27001 / FedRAMP as overlays:** hash-chained immutable audit log (server-walked attestation via `audit.verifyChain()`), AES-256-GCM at rest, Ed25519 signed exports, multi-tenant key isolation, GDPR Article 17 erasure orchestration with `requestId` correlation, GDPR Article 6 consent-basis tracking on the wire, column-level masking policies that compose with RBAC + break-glass, Safe Harbor de-identification of all 18 §164.514(b)(2) identifiers, and healthcare-relevant frameworks formally modelled (TLA+ + Coq + Kani + VOPR scenarios) — see [`docs/compliance/certification-package.md`](docs/compliance/certification-package.md).
 
 **What we have NOT done:** third-party SOC 2 Type II audit, HIPAA attestation + BAA, FedRAMP authorization, GDPR readiness review. These are v1.0 gates. Until then, **Kimberlite *enables* your compliance posture; certification remains your team's responsibility** (BAA with your hosting provider, pen test, audit firm engagement, internal controls). If you're a regulated startup, you can build on Kimberlite today knowing the substrate is sound — but the audit letters and certifications are work you (or we, post-v1.0) still have to do.
 

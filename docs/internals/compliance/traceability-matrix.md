@@ -183,8 +183,7 @@ Markers in this campaign: 211
 | `S2.1` | `crates/kimberlite-client/src/retry.rs` | 89 | added now that `kimberlite-client` carries |
 | `S2.4` | `crates/kimberlite-client/src/tenant_pool.rs` | 3 | lifts notebar's LRU-per-tenant adapter |
 | `S2.1` | `crates/kimberlite-client/tests/async_parity.rs` | 1 | parity test for the async (tokio) client. |
-| `S3.7` | `crates/kimberlite-client/tests/e2e_finance.rs` | 1 | finance / immutable-ledger E2E test. |
-| `S3.7` | `crates/kimberlite-client/tests/e2e_healthcare.rs` | 1 | healthcare E2E lifecycle test. |
+| `S3.7` | `crates/kimberlite-client/tests/e2e_healthcare.rs` | 1 | healthcare E2E lifecycle test (finance E2E removed in Q1 2026 healthcare pivot). |
 | `L-2:` | `crates/kimberlite-compliance/src/audit.rs` | 342 | replaces the ambiguous `Option<String>` that made |
 | `L-6:` | `crates/kimberlite-compliance/src/audit.rs` | 440 | replaces the ambiguous `Option<u64>` tenant_id. |
 | `H-2` | `crates/kimberlite-compliance/src/audit.rs` | 500 | hash chain |

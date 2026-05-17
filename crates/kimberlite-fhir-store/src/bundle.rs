@@ -86,13 +86,12 @@ impl BundleIngester {
 
         let mut out = Vec::with_capacity(bundle.entry.len());
         for (index, entry) in bundle.entry.iter().enumerate() {
-            out.push(self.entry_to_event(index, entry)?);
+            out.push(Self::entry_to_event(index, entry)?);
         }
         Ok(out)
     }
 
     fn entry_to_event(
-        &self,
         index: usize,
         entry: &BundleEntry,
     ) -> Result<IngestedEntry, BundleIngestError> {

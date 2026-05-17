@@ -58,7 +58,7 @@ guides you through project setup:
 
 1. **Welcome** — shows the Kimberlite version
 2. **Path prompt** — where to create your project (default: `./my-app`)
-3. **Template selection** — choose from Default, Healthcare, Finance, Legal, or Multi-tenant
+3. **Template selection** — choose from Default, EHR, Claims, Research, or Multi-tenant
 4. **Scaffolding** — creates directories, config, `.gitignore`, and README
 5. **Summary** — shows what was created and next steps
 
@@ -70,10 +70,10 @@ guides you through project setup:
 - `--template <NAME>` - Use a project template (skips template prompt in wizard)
 
 **Templates:**
-- `healthcare` - HIPAA-ready healthcare application
-- `finance` - SOX/PCI-DSS financial application
-- `legal` - Legal industry template
-- `multi-tenant` - Multi-tenant SaaS template
+- `ehr` - EHR/EMR application (patients, encounters, observations — FHIR R4 wedge)
+- `claims` - Payer/RCM application (X12 837 ingestion, 835 remittance, audit chain)
+- `research` - Clinical research application (consent, IRB retention, Safe Harbor de-id)
+- `multi-tenant` - Multi-tenant healthcare SaaS scaffold (organizations, users, resources)
 
 **Example:**
 

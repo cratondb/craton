@@ -36,10 +36,10 @@ The wizard walks you through project setup with diamond-styled prompts:
 
   ◆  Which template would you like?
   │ > default          Empty project with minimal setup
-  │   healthcare       HIPAA-ready (patients, encounters, providers)
-  │   finance          SOX/PCI-DSS (accounts, trades, positions)
-  │   legal            Chain of custody (cases, evidence, legal holds)
-  │   multi-tenant     SaaS isolation (organizations, users, resources)
+  │   ehr              EHR/EMR (patients, encounters, observations — FHIR R4 wedge)
+  │   claims           Payer/RCM (X12 837 ingestion, 835 remittance, audit chain)
+  │   research         Clinical research (consent, IRB retention, Safe Harbor de-id)
+  │   multi-tenant     Clinic SaaS isolation (organizations, users, resources)
 
   │
 
