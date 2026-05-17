@@ -176,7 +176,7 @@ Today's VOPR scenarios target VSR (consensus) and the kernel directly. The super
 
 **Estimate**: 1 week (done).
 
-### T3.3 — Daemonization examples — **DONE** (commit pending)
+### T3.3 — Daemonization examples — **DONE** (2993ff6)
 
 `examples/deployment/systemd/` and `examples/deployment/docker-compose/` reference configurations. systemd unit files for each node, with proper `Restart=on-failure`, `WantedBy=multi-user.target`, and post-start health-check.
 
