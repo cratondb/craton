@@ -18,6 +18,28 @@ user-facing narrative.
 _Accretion slot for v0.9.0 work. See [`ROADMAP.md`](./ROADMAP.md)
 for planned scope._
 
+### Added — v0.9.x cluster graduation T3.3
+
+- **`examples/deployment/systemd/`** — production-shaped templated
+  systemd units (`kimberlite-cluster@.service`,
+  `kimberlite-cluster-readyz@.service`) for the canonical
+  one-node-per-host hospital deployment. Wires `Restart=on-failure`
+  + `StartLimitBurst` underneath the in-tree supervisor's bounded-backoff
+  loop, hardens the process (`ProtectSystem`, `PrivateTmp`,
+  `NoNewPrivileges`), and ships an oneshot readyz-poller for deployment
+  automation that needs to gate "rollout complete" on real `/readyz=200`
+  rather than process-alive.
+- **`examples/deployment/docker-compose/`** — single-host 3-node stack
+  built around an `init` one-shot (`kimberlite cluster init --host
+  kimberlite-0 --host kimberlite-1 --host kimberlite-2`) that the three
+  node services depend on. Healthchecks poll `/readyz` (not
+  `kimberlite info`), exposing the T1.2 admin endpoints to the docker
+  daemon. README reproduces the T1.3 leader-kill scenario as a hands-on
+  failover walkthrough.
+- **`examples/deployment/README.md`** — orientation between the two
+  patterns; cross-linked from `examples/README.md` and the cluster
+  runbook.
+
 ### Added — v0.9.x cluster graduation T3.2
 
 - **Measured RTO + RPO baseline** for the 3-node cluster, published

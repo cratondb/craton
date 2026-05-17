@@ -1,0 +1,47 @@
+[Unit]
+# Post-start health verification for a kimberlite-cluster@%i.service.
+#
+# Polls the node's /readyz endpoint and exits 0 once the node is in VSR
+# Normal mode AND its log is within the configured replication-lag bound
+# of the leader. Used by deployment automation that needs to gate
+# "rollout complete" on real readiness, not just process-alive.
+#
+# The base port is the data port from cluster.toml; HTTP probe lives at
+# data_port + HTTP_PORT_OFFSET (1000), so node 0's data port 5432
+# exposes /readyz on 6432.
+#
+# Enable alongside the main unit:
+#     systemctl enable --now kimberlite-cluster@0.service \
+#                            kimberlite-cluster-readyz@0.service
+Description=Kimberlite cluster node %i readiness verification
+Documentation=https://docs.kimberlite.dev/operating/runbooks/cluster
+After=kimberlite-cluster@%i.service
+BindsTo=kimberlite-cluster@%i.service
+
+[Service]
+Type=oneshot
+User=kimberlite
+Group=kimberlite
+
+# Compute the admin HTTP port: base data port + node id + 1000.
+# Edit KIMBERLITE_DATA_BASE_PORT if you use a non-default base.
+Environment=KIMBERLITE_DATA_BASE_PORT=5432
+Environment=KIMBERLITE_READYZ_TIMEOUT_SECS=120
+
+ExecStart=/bin/sh -c '\
+  PORT=$$((KIMBERLITE_DATA_BASE_PORT + %i + 1000)); \
+  END=$$(( $$(date +%%s) + KIMBERLITE_READYZ_TIMEOUT_SECS )); \
+  while [ $$(date +%%s) -lt $$END ]; do \
+    if curl -fsS "http://127.0.0.1:$$PORT/readyz" >/dev/null 2>&1; then \
+      echo "Node %i ready on :$$PORT"; \
+      exit 0; \
+    fi; \
+    sleep 2; \
+  done; \
+  echo "Node %i did not reach /readyz=200 within $${KIMBERLITE_READYZ_TIMEOUT_SECS}s" >&2; \
+  exit 1'
+
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

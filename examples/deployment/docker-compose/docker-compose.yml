@@ -1,0 +1,154 @@
+# Three-node Kimberlite cluster reference deployment.
+#
+# Mirrors the production multi-host pattern from T2.1 (cluster
+# graduation), with the three "hosts" being three docker services on a
+# shared bridge network. Each node exposes:
+#
+#   - data port (5432 + node_id)  — client traffic
+#   - VSR  port (5532 + node_id)  — inter-node consensus (cluster-internal)
+#   - HTTP port (6432 + node_id)  — /healthz, /readyz, /metrics
+#
+# Bring up:
+#     docker compose up -d
+#
+# Verify (port-forwarded to the host for convenience):
+#     curl http://127.0.0.1:6432/readyz   # node 0
+#     curl http://127.0.0.1:6433/readyz   # node 1
+#     curl http://127.0.0.1:6434/readyz   # node 2
+#     curl http://127.0.0.1:6432/metrics  # Prometheus scrape from any node
+#
+# Tear down (keeps data volumes — add `-v` to wipe):
+#     docker compose down
+
+services:
+
+  # One-shot initializer. Runs `kimberlite cluster init` against the
+  # shared volume so every node sees the same cluster.toml. The init
+  # container exits 0 once the topology file exists; subsequent
+  # `docker compose up` invocations are no-ops because cluster.toml is
+  # not regenerated.
+  init:
+    image: kimberlitedb/kimberlite:latest
+    container_name: kimberlite-init
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        if [ -f /shared/cluster/cluster.toml ]; then
+          echo "cluster.toml already exists — skipping init"
+          exit 0
+        fi
+        kimberlite cluster init \
+          --project /shared \
+          --host kimberlite-0 \
+          --host kimberlite-1 \
+          --host kimberlite-2
+    volumes:
+      - kimberlite-shared:/shared
+    networks:
+      - kimberlite-cluster
+    restart: "no"
+
+  kimberlite-0:
+    image: kimberlitedb/kimberlite:latest
+    container_name: kimberlite-0
+    hostname: kimberlite-0
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    command:
+      - cluster
+      - start
+      - --node-id
+      - "0"
+      - --project
+      - /shared
+    ports:
+      - "5432:5432"  # data
+      - "6432:6432"  # admin HTTP (/healthz, /readyz, /metrics)
+    volumes:
+      - kimberlite-shared:/shared
+    healthcheck:
+      # /readyz returns 200 only when the node is in VSR Normal mode
+      # AND its log is within the replication-lag bound of the leader.
+      # During leader-kill the follower flips red within ~5s (T1.3
+      # acceptance criterion); the 30s `start_period` gives initial
+      # leader election headroom.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:6432/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - kimberlite-cluster
+
+  kimberlite-1:
+    image: kimberlitedb/kimberlite:latest
+    container_name: kimberlite-1
+    hostname: kimberlite-1
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    command:
+      - cluster
+      - start
+      - --node-id
+      - "1"
+      - --project
+      - /shared
+    ports:
+      - "5433:5433"
+      - "6433:6433"
+    volumes:
+      - kimberlite-shared:/shared
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:6433/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - kimberlite-cluster
+
+  kimberlite-2:
+    image: kimberlitedb/kimberlite:latest
+    container_name: kimberlite-2
+    hostname: kimberlite-2
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    command:
+      - cluster
+      - start
+      - --node-id
+      - "2"
+      - --project
+      - /shared
+    ports:
+      - "5434:5434"
+      - "6434:6434"
+    volumes:
+      - kimberlite-shared:/shared
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:6434/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - kimberlite-cluster
+
+volumes:
+  # Shared volume holds cluster.toml plus all three per-node data dirs
+  # under cluster/node-{0,1,2}/. For production you would split this
+  # into per-node volumes (one volume per host) — the shared layout
+  # here trades isolation for setup-simplicity in a single-host demo.
+  kimberlite-shared:
+
+networks:
+  kimberlite-cluster:
+    driver: bridge

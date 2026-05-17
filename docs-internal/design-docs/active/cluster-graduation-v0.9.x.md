@@ -98,7 +98,7 @@ All four T1.3 integration scenarios run 5/5 (and 30/30 across longer rolls) on m
 
 The `CommandSubmitter::status()` path was also tightened to use a single atomic `MultiNodeReplicator::shared_state()` snapshot rather than walking `is_leader()` + `view()` + `replica_status()` through three separate `RwLock` reads — a small defensive correction that prevents a partially-updated `update_shared_state` boundary from surfacing in `/metrics`.
 
-### T2.1 — Non-localhost / multi-host topology — **DONE (commit pending)**
+### T2.1 — Non-localhost / multi-host topology — **DONE** (8df6dc9)
 
 Today's `ClusterConfig` hardcodes `127.0.0.1`. A hospital deployment needs nodes on three different hosts behind a load balancer.
 
@@ -116,7 +116,7 @@ Today's `ClusterConfig` hardcodes `127.0.0.1`. A hospital deployment needs nodes
 - **Estimate**: 4 days
 - **Follow-up surfaced**: `tests/three_node_smoke.rs`'s embedded `pick_base_port` (from T1.1, pre-`tests/common/`) sweeps only 32 attempts and gets starved on systems where the OS ephemeral range is biased high (macOS default 49152-65535). Migrate it to `common::pick_base_port` (1000 attempts, downward sweep from a clamped start) when next touching that file.
 
-### T2.2 — Backup + restore semantics — **DONE (commit pending)**
+### T2.2 — Backup + restore semantics — **DONE** (5d337ee)
 
 HIPAA § 164.308(a)(7) — contingency plan requires data backup, disaster recovery, and emergency mode operation. Today there is no documented backup procedure.
 
@@ -131,23 +131,24 @@ HIPAA § 164.308(a)(7) — contingency plan requires data backup, disaster recov
 - **Scope deviation from doc wording**: the design said "JOIN-into-checkpoint" — VSR-coordinated pause for a quiescent snapshot. The shipped path is offline-safe: operator either stops writes for a clean snapshot or accepts the trailing-fsync-window semantic. Online-coordinated backup is documented in the runbook as a v1.0 deliverable.
 - **Estimate**: 1.5 weeks
 
-### T2.3 — Cluster-level VOPR scenarios
+### T2.3 — Cluster-level VOPR scenarios — **SCAFFOLDING DONE** (4a7237e); drivers are follow-on
 
 Today's VOPR scenarios target VSR (consensus) and the kernel directly. The supervisor itself — process restart, health-check timing, config reload, cascading node failure — has zero VOPR coverage.
 
 - **File**: `crates/kimberlite-sim/src/scenarios.rs`
-- **New variants** (scaffolded under the established "drivers ship per-commit" idiom):
+- **Scaffolded variants** (registered through `ScenarioType::all()`, `is_aspirational()`, `description()` and dispatched to `aspirational_v07` baseline like the Q2 clinical sibling family — drivers ship per-scenario in subsequent commits):
   - `ClusterNodeProcessCrash` — SIGKILL one node, supervisor restarts within `restart_window_ms`, restart count audited
   - `ClusterCascadingNodeFailure` — N-1 nodes crash in sequence (where N is quorum size); cluster blocks writes but never loses committed entries
   - `ClusterHealthCheckTimeout` — node hangs without crashing; `/readyz` flips red within bounded time; supervisor escalates to restart
   - `ClusterConfigReloadUnderLoad` — `cluster.toml` updated mid-write; no in-flight write loses durability
   - `ClusterRollingRestartFullCluster` — each node restarted in sequence; the leader transition window doesn't drop committed entries
 - **Acceptance**: 5 scenarios added to `ScenarioType::all()`, `is_aspirational()`, and `description()` arms with canary-mutation contracts (same pattern as Q2's clinical scenarios). Drivers ship per-scenario in follow-ons.
-- **Estimate**: 3 days for scaffolding; drivers are separate work.
+- **What shipped**: all 5 variants registered with the canary contracts above; matrix gate ("5 cluster scenarios in `ScenarioType::all()` with canary contracts") is met. Drivers remain follow-on work alongside the parallel Q2 clinical scenario family (which uses the same scaffolding-only convention).
+- **Estimate**: 3 days for scaffolding (done); per-driver follow-ons are separately tracked.
 
 ## T3 — Important (must be planned, may slip to v1.0)
 
-### T3.1 — Ops runbook — **DONE (commit pending)**
+### T3.1 — Ops runbook — **DONE** (b4b0696, 53e504b)
 
 `docs/operating/runbooks/cluster.md` — covering:
 - Failover procedure (manual leader transfer, RTO expectations)
@@ -161,19 +162,32 @@ Today's VOPR scenarios target VSR (consensus) and the kernel directly. The super
 
 **Estimate**: 1 week. Touch only after the cluster behaviours are real.
 
-### T3.2 — Performance baseline + RTO/RPO measurement
+### T3.2 — Performance baseline + RTO/RPO measurement — **DONE** (bb5082b)
 
 - Sustained-write benchmark suite that runs against the 3-node configuration
 - Documented RTO (time-to-recovery after leader kill) and RPO (data-loss window) under fault injection
 - Published in `docs/operating/performance/cluster.md` plus the v0.9.x release notes
 
-**Estimate**: 1 week.
+**What shipped**:
+- `crates/kimberlite-cluster/tests/perf_baseline.rs` — three `#[ignore]`-tagged harnesses: `perf_rto_leader_kill`, `perf_rpo_leader_kill`, `perf_sustained_write_throughput`. Env-tunable (`KIMBERLITE_PERF_ITERATIONS`, `KIMBERLITE_PERF_SECS`, `KIMBERLITE_PERF_PAYLOAD`). RPO harness uses a hard `assert_eq!` on acked-vs-readable so safety regressions fail loudly; availability stalls under sustained-write leader kill are recorded separately.
+- `docs/operating/performance/cluster.md` (167 lines) — methodology + measured numbers (n=8, Apple Silicon, localhost): RTO p99 ≈ 1.05 s vs runbook 5 s target (~5× headroom), RPO = 0 across all completed iterations, throughput ≈ 75 events/s @ 256 B (p50 ≈ 11 ms, p99 ≈ 23 ms). Reproduction recipe + known-limitation note for the ~1-in-8 view-change stall under sustained-write leader kill (deferred to v0.10.x stability work).
+- `docs/operating/runbooks/cluster.md` — RTO/RPO tables grew a measured-column alongside target-column, link to the perf doc.
+- CHANGELOG.md — v0.9.x T3.2 block with headline numbers.
 
-### T3.3 — Daemonization examples
+**Estimate**: 1 week (done).
+
+### T3.3 — Daemonization examples — **DONE** (commit pending)
 
 `examples/deployment/systemd/` and `examples/deployment/docker-compose/` reference configurations. systemd unit files for each node, with proper `Restart=on-failure`, `WantedBy=multi-user.target`, and post-start health-check.
 
-**Estimate**: 2 days.
+**What shipped**:
+- `examples/deployment/systemd/kimberlite-cluster@.service` — templated unit instantiated per node-id (`@0`, `@1`, `@2`). `Restart=on-failure` with `StartLimitBurst=5` over a 60s window, `TimeoutStopSec=60s`, hardened (`ProtectSystem=full`, `PrivateTmp=true`, `NoNewPrivileges=true`, `LimitNOFILE=65536`).
+- `examples/deployment/systemd/kimberlite-cluster-readyz@.service` — `Type=oneshot` + `RemainAfterExit=yes` companion that polls `/readyz` until 200 OK (or `KIMBERLITE_READYZ_TIMEOUT_SECS` elapses). `BindsTo` the main unit so deployment automation can `systemctl enable --now kimberlite-cluster-readyz@N` and gate on real readiness, not just process-alive.
+- `examples/deployment/docker-compose/docker-compose.yml` — 3-node stack with a one-shot `init` service that runs `kimberlite cluster init --host kimberlite-0 --host kimberlite-1 --host kimberlite-2` against a shared volume on first start. Each node service `depends_on` it with `condition: service_completed_successfully`. Healthchecks hit `/readyz` (the T1.2 admin endpoints), not `kimberlite info`. Data + admin ports published; VSR port stays internal to the bridge network.
+- `examples/deployment/README.md` orienting between the two patterns; `examples/README.md` index updated.
+- `CHANGELOG.md` v0.9.x T3.3 block.
+
+**Estimate**: 2 days (done).
 
 ## T4 — Nice-to-have (v1.0+)
 

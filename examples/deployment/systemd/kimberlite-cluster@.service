@@ -1,0 +1,70 @@
+[Unit]
+# Templated systemd unit for a single Kimberlite cluster node.
+#
+# Instance name (`%i`) is the node id from `cluster.toml`. Enable one
+# instance per host in a multi-host deployment:
+#
+#     systemctl enable --now kimberlite-cluster@0.service   # on host 0
+#     systemctl enable --now kimberlite-cluster@1.service   # on host 1
+#     systemctl enable --now kimberlite-cluster@2.service   # on host 2
+#
+# For a single-host (development / staging) cluster, enable all three on
+# the same box — port collisions are caught by `ClusterConfig::validate`
+# at startup, not silently after the listener fails to bind.
+Description=Kimberlite cluster node %i
+Documentation=https://docs.kimberlite.dev/operating/runbooks/cluster
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kimberlite
+Group=kimberlite
+
+# Where `kimberlite cluster init` was run. Override per-host with a
+# drop-in if needed: /etc/systemd/system/kimberlite-cluster@.service.d/override.conf
+Environment=KIMBERLITE_PROJECT=/var/lib/kimberlite/cluster
+
+# Optional: pin the binary explicitly. Otherwise PATH lookup is used,
+# matching the `KIMBERLITE_BIN` envvar honoured by the supervisor (T1.1).
+# Environment=KIMBERLITE_BIN=/usr/local/bin/kimberlite
+
+ExecStart=/usr/local/bin/kimberlite cluster start --node-id %i --project ${KIMBERLITE_PROJECT}
+
+# Restart-on-failure mirrors the supervisor's own bounded-backoff
+# behaviour for the child VSR process: if the supervisor itself dies
+# (OOM, panic, signal from outside), systemd brings it back. The
+# 30s window prevents tight restart loops from masking config or
+# disk-full bugs.
+Restart=on-failure
+RestartSec=5s
+StartLimitInterval=60s
+StartLimitBurst=5
+
+# Graceful stop: SIGTERM lets the supervisor drain VSR commits and
+# fsync the log before exit. 60s matches the runbook's quorum-drain
+# expectation on a 3-node localhost cluster; tune up for larger writes.
+KillSignal=SIGTERM
+TimeoutStopSec=60s
+
+# Hardening — no network filtering, but keep the process sandboxed
+# from the rest of the box. Comment out anything that conflicts with
+# your filesystem layout.
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/kimberlite
+
+# File descriptor headroom. Each peer connection eats two fds; the
+# admin HTTP server adds a handful more. 65k is overkill for a
+# 3-node cluster but cheap and forward-compatible with read-replica
+# fanout (T4 nice-to-have).
+LimitNOFILE=65536
+
+# stdout/stderr go to the journal; pair with `journalctl -u kimberlite-cluster@0`.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
