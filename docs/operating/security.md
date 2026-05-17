@@ -9,6 +9,8 @@ order: 6
 
 This document covers security configuration for Kimberlite and the cloud platform, including authentication, authorization, TLS, and tenant isolation.
 
+> **Cluster operations security:** see [`runbooks/cluster.md`](runbooks/cluster.md) for the HIPAA § 164.308(a)(7) contingency-plan procedures (backup, restore, quorum-loss recovery) and the audit-log integrity verification workflow for post-recovery cluster state.
+
 ## Table of Contents
 
 1. [Security Model](#security-model)

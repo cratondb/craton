@@ -9,6 +9,8 @@ order: 4
 
 Monitor Kimberlite clusters in production.
 
+> **Running a 3-node cluster?** Pair this metrics guide with [`runbooks/cluster.md`](runbooks/cluster.md) — the runbook maps the cluster gauges below (`kimberlite_is_leader`, `kimberlite_committed_offset`, `kimberlite_replication_lag_seconds`, `kimberlite_view_number`) to specific failure modes and triage steps.
+
 ## Overview
 
 Kimberlite provides comprehensive observability through:

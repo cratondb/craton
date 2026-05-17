@@ -9,6 +9,8 @@ order: 1
 
 This guide covers deploying Kimberlite and the cloud platform in production environments.
 
+> **Operating a 3-node cluster?** Procedures for failover, quorum loss, rolling upgrades, and backup/restore live in [`runbooks/cluster.md`](runbooks/cluster.md). Measured RTO/RPO and throughput baselines for the same topology are in [`performance/cluster.md`](performance/cluster.md).
+
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)
