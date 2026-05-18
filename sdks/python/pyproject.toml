@@ -12,8 +12,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kimberlite"
-version = "0.8.0"
-description = "Python SDK for Kimberlite database"
+version = "0.9.0"
+description = "Python SDK for Kimberlite — the verifiable database for healthcare"
 readme = "README.md"
 # v0.7.0 — floor bumped 3.9 → 3.10. Python 3.9 reached EOL
 # 2025-10. The bump unlocks PEP 604 union syntax (`X | None`) at

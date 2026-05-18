@@ -13,23 +13,27 @@ Detail for each planned feature lives in GitHub issues.
 
 ## Status
 
-**Current release:** `v0.8.0` (2026-05-06) — notebar v0.7.0-migration
-wishlist + SDK error/audit ratchet. Six items surfaced when notebar
-drove a real workload on top of v0.7.0; each shipped behind its own
-PR (#125 → #131). Highlights: typed unique-constraint error
-(`QueryError::DuplicatePrimaryKey` end-to-end across Rust / TS /
-Python), `requestId` on the `eraseSubject` per-stream callback,
-`Effect::ProjectionRowsPurge` for DROP TABLE row purge,
-`streamLength(streamId)` O(1) primitive (TS + Rust),
-TS bindings for the v0.7.0 typed primitives (`Interval`,
-`SubstringRange`, `DateField`, `AggregateMemoryBudget`),
-server-walked `audit.verifyChain()` (replaces the v0.5.0 / v0.6.0
-hardcoded `{ ok: true }` stub) on TS + Rust, and `audit.subscribe()`
-polling iterator on TS. Python parity for these items is the
-v0.9.0 ratchet — see "v0.9.0 — in-flight" below. See
-[`CHANGELOG.md`] for the full list.
+**Current release:** `v0.9.0` (2026-05-18) — healthcare-pivot
+release. Kimberlite is now positioned exclusively as a verifiable
+database for healthcare (EHR / payer-RCM / clinical research /
+digital health), with GDPR / SOC 2 / ISO 27001 / FedRAMP as overlay
+frameworks. Q1 (FHIR R4 + SMART-on-FHIR), Q2 (HL7 v2 + cluster HA),
+and Q3 (Safe Harbor de-identification + KMS provider trait + X12
+envelope + pediatric retention) all landed. Pivot-cleanup sweep
+purged finance / legal / government framing from the website, docs,
+and SDK descriptions; SOX / GLBA / FERPA / CMMC / NIS2 / DORA /
+eIDAS / IRAP frameworks marked explicitly out of product scope.
+PRESSURECRAFT Wave 3 complete (all 10 Bucket-C panicking
+`pub fn new()` sites migrated to paired `try_new()`). Six
+healthcare VOPR scenarios promoted out of `aspirational_v07` to
+real fault drivers. Four healthcare fuzz targets added (FHIR, X12,
+Safe Harbor de-id, audit signature round-trip). New
+`specs/tla/Healthcare.tla` adds four healthcare-specific
+invariants gated in PR CI. See [`CHANGELOG.md`] for the full list.
 
-**Next release:** v0.9.0 — see "v0.9.0 — in-flight" below.
+**Next release:** v0.10.0 — Firecracker / KVM multi-node DST on
+Hetzner EPYC, KMS production backends (AWS / Azure / GCP),
+geo-fencing enforcement layer, full X12 837 claim-loop schemas.
 
 **Target v1.0:** when the gates below close. No fixed date — we ship
 when the third-party audits, SDK coverage, and production readiness
