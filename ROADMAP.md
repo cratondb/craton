@@ -46,136 +46,154 @@ criteria are all green.
 
 ---
 
-## v0.9.0 — in-flight
+## v0.10.0 — in-flight
 
-The v0.9.0 cycle finishes the items v0.8.0 deferred (Go SDK Phase 1,
-plan-time time-fold production wiring, VOPR scenario drivers for the
-v0.7.0 scaffolds, pool-metrics client-side parity) plus Python parity
-for the SDK primitives that landed TS-first / Rust-first in v0.8.0.
-Stretch goal: published performance baselines on reference hardware
-so the `compare/postgresql` page and the README's trade-off table
-quote real numbers instead of qualitative language.
+The v0.10.0 cycle is the production-hardening release. v0.9.0
+finished the healthcare positioning + the Q1/Q2/Q3 feature wedge;
+v0.10.0 turns the design surfaces shipped in v0.9.0 into
+production-ready substrate.
 
-### Healthcare pivot — landed in the v0.9.0 cycle
+### Scoped for v0.10.0 (from v0.9.0 deferral decision)
 
-The healthcare-only repositioning ("Kimberlite is a verifiable
-database for healthcare") drove a large body of work that has
-already merged on main, ahead of the v0.9.0 cut:
+- [ ] **Hypervisor-based multi-node DST on Hetzner EPYC.**
+      Today's `kimberlite-sim` runs in-process; EPYC nightly uses
+      EPYC for CPU-hour capacity, not VM-level instrumentation.
+      Build a Firecracker / KVM harness that boots a real 3-node
+      cluster in microVMs, kills a VM mid-write, and asserts
+      recovery via VSR view-change against the existing log /
+      audit / projection invariants. Pairs the in-process VOPR
+      (deep, fast) with VM-isolated DST (high-fidelity, slower).
+      Dependency: `kimberlite-chaos` + cluster supervisor must
+      stay stable. Estimated ~4 weeks; design doc lands first.
+- [ ] **KMS production backends (AWS / Azure / GCP).** v0.9.0
+      shipped the `KmsProvider` trait + a file-backed dev
+      provider in `kimberlite_crypto::kms`. v0.10.0 ships first-
+      class implementations: AWS KMS via `aws-sdk-kms`, Azure
+      Key Vault via `azure_security_keyvault`, GCP KMS via
+      `google-cloud-kms`. Each behind an off-by-default cargo
+      feature so the default binary stays dependency-light.
+      Order: AWS KMS first (most common BYOK ask for federal-
+      touching healthcare), then Azure (VA / DoD MTF tenants),
+      then GCP. Includes a KEK-rotation property test against
+      each backend's mock.
+- [ ] **Geo-fencing / data-sovereignty enforcement layer.**
+      v0.9.0 ships `PlacementPolicy` as an API surface;
+      v0.10.0 ships the enforcement layer that rejects
+      cross-region replication when a stream is region-pinned.
+      Touches `kimberlite-directory` (placement routing) and
+      `kimberlite-vsr` (replica selection). Use case: BAA
+      jurisdictional gates (US-only data must not replicate
+      to EU read replicas; AU patient data must stay in
+      ap-southeast-2). New TLA+ property: `PlacementInvariant`
+      in `Healthcare.tla` extension.
+- [ ] **Full X12 837 claim-loop schemas.** v0.9.0 ships envelope
+      + segment-iterator only (sufficient for ingest + audit-event
+      emission). v0.10.0 adds typed loop schemas for the deep
+      structure of 837P (professional), 837I (institutional), and
+      837D (dental) — the 1000+ segment loop catalog with
+      submitter / subscriber / patient / provider / claim-detail /
+      service-line decomposition. Plus the first-pass 837 writer.
+      Marker for full schemas was previously v0.11+; promoted to
+      v0.10 to unblock first-class clearinghouse adapters.
+
+### Carried over from v0.9.0 (did not ship in v0.9.0 cut)
+
+These items were declared in-flight at the start of the v0.9.0
+cycle but the healthcare pivot took priority; each lands in v0.10:
+
+- [ ] **Go SDK — Phase 1.** `Connect`/`Query`/`Append`/`Read`/
+      `Subscribe`/`Pool` over the existing FFI bridge.
+      Scaffolding lives at `sdks/go/`. Phase 2 (compliance) and
+      Phase 3 (typed primitives + framework integrations)
+      follow inside v0.10.x → v1.0.
+- [ ] **Plan-time time-fold production wiring.** v0.7.0 shipped
+      the `ScalarExpr::Now` / `CurrentTimestamp` / `CurrentDate`
+      sentinel variants with `#[should_panic]` tests verifying
+      the evaluator panics if reached unfolded. The planner-side
+      `fold_time_constants` pass needs to be implemented and
+      wired into `tenant.rs::execute`.
+- [ ] **VOPR scenario drivers for the remaining 11 v0.7.0
+      scaffolds.** v0.9.0 promoted the 6 healthcare clinical
+      scenarios + the 5 cluster scenarios; 11 of the original 16
+      `Masking*` / `Upsert*` / `AsOfTimestamp*` /
+      `EraseAutoDiscovery*` scaffolds still delegate to
+      `aspirational_v07`. Land one driver per family.
+- [ ] **Pool metrics — client-side Prometheus parity.** Server-
+      side metrics already exist at
+      `crates/kimberlite-server/src/metrics.rs`; the TS /
+      Python / Rust client-side surface is still pending.
+      AWS-ECS-friendly: text-format `pool.metrics()` consumed
+      by CloudWatch Prometheus source.
+- [ ] **Python parity for v0.8.0 deliveries.** `streamLength`
+      (O(1) row count), typed primitive bindings (`Interval`,
+      `SubstringRange`, `DateField`, `AggregateMemoryBudget`),
+      and `audit.verifyChain` / `audit.subscribe`.
+- [ ] **Rust `audit.subscribe` polling iterator.** TS shipped
+      in v0.8.0; Rust client + Python parity follow here.
+- [ ] **Performance baselines on reference hardware.** Quoted
+      in the README trade-off table and the `compare/postgresql`
+      website page. Bench harness already exists; v0.10.0
+      publishes numbers (single-node read/write throughput,
+      consensus latency on a 3-node VSR cluster, audit-chain
+      verification cost).
+
+---
+
+## Released
+
+### v0.9.0 (2026-05-18)
+
+The healthcare-only release. Kimberlite is no longer positioned as a
+generic compliance database — every primitive is now sized to HIPAA,
+with GDPR / SOC 2 / ISO 27001 / FedRAMP as overlay frameworks.
+SOX / GLBA / FERPA / CMMC / NIS2 / DORA / eIDAS / IRAP marked
+explicitly out of product scope (specs retained for historical
+reference). Full detail in [`CHANGELOG.md`].
 
 - ✅ **Sprint 1 — strip.** Finance / legal examples deleted; README,
   ROADMAP, docs, examples README, blog posts, and website templates
   rewritten around the clinical/EHR-adjacent wedge. Studio
   playground collapsed to a single healthcare tenant. Residual
   `tenant-{finance,legal,government,retail,insurance}` CSS selectors
-  pruned. (commits `eb5a57f`, plus this cycle's CSS sweep)
+  pruned. (`eb5a57f`, plus pivot-sweep cleanup)
 - ✅ **Sprint 2 — healthcare-first defaults.** New streams default
   to `DataClass::PHI`, audit-on, retention=6y, encryption-required.
   Purpose-of-use enum extended with HIPAA TPO + `Research`,
   `PublicHealth`, `Emergency`. `BreakGlassActivated` /
   `BreakGlassClosed` audit events with mandatory justification.
   Audit-log retention promoted to a distinct policy class
-  (HIPAA §164.530(j)(2)). (commit `4b8590e`)
+  (HIPAA §164.530(j)(2)). (`4b8590e`)
 - ✅ **Q1 — FHIR + SMART on FHIR.** `kimberlite-fhir` crate (R4
   typed resources, canonical JSON, FHIRPath subset),
   `kimberlite-fhir-store` (FHIR ↔ Kimberlite event + projection
   adapter), `kimberlite-rbac` SMART scope parsing + `authorize()`
   + JWT validation. `examples/ehr_mini` + `examples/smart_on_fhir_app`
   shipped, plus the "FHIR-native, verifiable" blog post.
-  (commits `fa782d0`, `08bc9ab`, `dc828c2`, `1379af2`)
+  (`fa782d0`, `08bc9ab`, `dc828c2`, `1379af2`)
 - ✅ **Q2 — HL7v2 + cluster HA graduation.** `kimberlite-hl7v2`
   crate (parser, encoder, MLLP framing, typed ADT^A01) +
   `examples/hl7v2_feed`. Clinical + cluster VOPR scenarios
-  promoted out of aspirational. `kimberlite-cluster` graduated from
-  "not ready for public use" through the T1 → T3 punch list (real
-  subprocess spawn, multi-host topology, /healthz + /readyz + /metrics,
-  backup/restore, 3-node integration tests, ops runbook, perf
-  baseline harness with measured RTO/RPO, systemd + docker-compose
-  deployment references). (commits `e45ebe6`, `4a7237e`, `6c878a8`,
-  `f1fd8df` … `19e1e5e`, `2993ff6`, `53e504b`)
-
+  promoted out of aspirational. `kimberlite-cluster` graduated
+  from "not ready for public use" through the T1 → T3 punch list.
+  (`e45ebe6`, `4a7237e`, `6c878a8`, `f1fd8df` … `19e1e5e`,
+  `2993ff6`, `53e504b`)
 - ✅ **Q3 — moat layer.** HIPAA Safe Harbor de-identification
-  (new `kimberlite_compliance::deidentification` module +
-  `DeidentificationApplied` audit event), external KMS providers
-  for BYOK (new `kimberlite_crypto::kms` module — `KmsProvider`
-  trait + AWS/GCP/Azure integration docs + in-memory mock +
-  KEK rotation flow), `kimberlite-x12` crate (837P/I/D + 835
-  envelope + typed wrappers), pediatric birthdate-anchored
-  retention (`PediatricRetention` + per-state age-of-majority
-  override), and the `claims_mini` + `research_mini` examples
-  (X12 ingest + 21 CFR Part 11 e-signature). All Q3 items
-  green-on-clippy `-D warnings`; full CHANGELOG entry under
-  Unreleased.
-
-- [ ] **Go SDK — Phase 1.** `Connect`/`Query`/`Append`/`Read`/
-      `Subscribe`/`Pool` over the existing FFI bridge. Scaffolding
-      lives at `sdks/go/`; v0.7.0 + v0.8.0 deferred this so TS /
-      Python / Rust stayed at parity for the data plane and
-      compliance surface. Phase 2 (compliance) and Phase 3
-      (typed primitives + framework integrations) follow inside
-      the v0.9.x → v1.0 window.
-- [ ] **Plan-time time-fold production wiring.** v0.7.0 shipped
-      the `ScalarExpr::Now` / `CurrentTimestamp` / `CurrentDate`
-      sentinel variants and the evaluator panics if reached
-      unfolded (paired `#[should_panic]` tests at
-      `crates/kimberlite-query/src/expression.rs:1336-1354`
-      verify). The planner-side `fold_time_constants` pass needs
-      to be implemented and wired into `tenant.rs::execute` so
-      production queries actually use these scalars without
-      panicking. Carried over from v0.8.0 in-flight.
-- [ ] **VOPR scenario drivers for the 16 v0.7.0 scaffolds.** Each
-      `Masking*` / `Upsert*` / `AsOfTimestamp*` /
-      `EraseAutoDiscovery*` variant has a documented canary
-      mutation; the driver step that injects + asserts ships per
-      family. Currently each variant runs the baseline workload
-      via `ScenarioConfig::aspirational_v07`. Carried over.
-- [ ] **Graduate `kimberlite-cluster` to production-ready.**
-      Healthcare clinical workloads require multi-node HA (5+
-      nines). Cluster today is a single-machine process
-      supervisor with placeholder `sleep infinity` subprocess
-      spawning; the consensus protocol itself lives in
-      `kimberlite-vsr` and is mature. The graduation work is
-      integration plumbing + operational surface: real
-      subprocess spawn, HTTP `/healthz` + `/readyz` + `/metrics`
-      per node, 3-node integration tests with real binaries,
-      multi-host topology support, backup/restore semantics,
-      cluster-level VOPR scenarios, and ops runbooks. Full
-      punch list at
-      [`docs-internal/design-docs/active/cluster-graduation-v0.9.x.md`].
-      Estimated ~9.5 weeks of focused effort.
-- [ ] **Pool metrics — client-side Prometheus parity.** Server-side
-      metrics already exist at
-      `crates/kimberlite-server/src/metrics.rs`; v0.7.0 + v0.8.0
-      deferred the TS / Python / Rust client-side surface because
-      it touches the napi-rs binding layer. AWS ECS-friendly
-      design: text-format `pool.metrics()` consumed by CloudWatch
-      Prometheus source.
-- [ ] **Python parity for v0.8.0 deliveries.** Catch-up cycle for
-      the items that landed TS-first / Rust-first:
-      `streamLength` (O(1) row count), typed primitive bindings
-      (`Interval`, `SubstringRange`, `DateField`,
-      `AggregateMemoryBudget`), and `audit.verifyChain` /
-      `audit.subscribe`. Re-uses the same wire frames; Python
-      napi-equivalent shapes via the existing FFI bridge.
-- [ ] **Rust `audit.subscribe` polling iterator.** TS shipped in
-      v0.8.0; Rust client + Python parity follow here. Mirror the
-      shape of `erasure.subscribe()`. Cross-stream subscription-
-      filter server hook (push-based instead of polling) stays
-      deferred — the polling iterator is sufficient for the
-      dashboard use-case notebar surfaced.
-- [ ] **Performance baselines on reference hardware.** Quoted in
-      the README trade-off table and the `compare/postgresql`
-      website page. Bench harness already exists; v0.9.0 publishes
-      numbers (single-node read/write throughput, consensus
-      latency on a 3-node VSR cluster, audit-chain verification
-      cost). Closes the qualitative-only gap for founders
-      evaluating Kimberlite for production workloads.
-
-(Plus the items below carried forward from the v0.7.0 deferred
-section — re-evaluate at v0.9.0 cycle planning.)
-
----
-
-## Released
+  (`kimberlite_compliance::deidentification` + `DeidentificationApplied`
+  audit event), `kimberlite_crypto::kms` (`KmsProvider` trait +
+  AWS/GCP/Azure integration docs + in-memory mock + KEK rotation),
+  `kimberlite-x12` crate (837P/I/D + 835 envelope + typed wrappers),
+  pediatric birthdate-anchored retention (`PediatricRetention` +
+  per-state age-of-majority override), `claims_mini` +
+  `research_mini` examples. (`5d5d8bd`)
+- ✅ **Release sweep.** PRESSURECRAFT Wave 3 (10/10 Bucket-C
+  panicking `pub fn new()` migrated to paired `try_new()` per
+  `docs-internal/contributing/constructor-audit-2026-04.md`); 6
+  healthcare VOPR scenarios promoted from `aspirational_v07` to
+  real fault drivers; 4 new fuzz targets (FHIR R4, X12 envelope,
+  Safe Harbor de-id, audit signature round-trip);
+  `specs/tla/Healthcare.tla` with 4 healthcare-specific invariants
+  (SafeHarborCoverage, BreakGlassAuditOrder, ConsentRevocationCausality,
+  NoPhiReadAfterRevocation) gated in PR CI. (`62385c1`)
 
 ### v0.8.0 (2026-05-06)
 
@@ -251,140 +269,6 @@ section — re-evaluate at v0.9.0 cycle planning.)
 - ✅ MIRI annotation for heavy AES-GCM roundtrip test (closes
   nightly-lite timeout regression)
 - ✅ `release-tag-sign` justfile recipe (GPG-signed tags)
-
----
-
-## v0.7.0 — released
-
-Scheduled for the first minor after v0.6.0. All items below were
-deliberately deferred from v0.6.0 to keep that release focused on the
-feature-complete compliance surface.
-
-### SQL
-
-- [ ] Additional scalar functions: `MOD`, `POWER`, `SQRT`, `SUBSTRING`,
-      `EXTRACT`, `DATE_TRUNC`, `NOW()`, `CURRENT_TIMESTAMP`,
-      `CURRENT_DATE`, plus interval arithmetic. Requires a clock
-      threading decision for VOPR-sim-vs-wall-clock (separate design
-      conversation).
-- [ ] `DELETE FROM t` (no WHERE) `rowsAffected` fix.
-      Test-infrastructure impact only. (`DROP TABLE IF EXISTS`
-      shipped in v0.6.2 alongside the integration-test cleanup.)
-- [ ] **Catalog staleness on DROP+CREATE same name.** Recreating a
-      table by the same name within a single connection leaves
-      stale planner state — parameter-bound INSERT into the
-      recreated table fails with `QueryParseError: SQL syntax
-      error`. v0.6.2 sidestepped it in the integration suites with
-      unique-per-test table names; the proper fix is to invalidate
-      whatever cache (planner / catalog snapshot / table-id resolver)
-      retains the dropped table's binding. Reproducer:
-      `DROP TABLE t; CREATE TABLE t (...); INSERT INTO t (...)
-      VALUES ($1, ...)` — the second INSERT's parameter binding
-      hits the stale catalog. Found by: notebar integration test
-      cleanup loop.
-- [ ] Auto-generated traceability matrix from in-source `AUDIT-YYYY-NN`
-      markers (currently manual).
-- [ ] SQL planner — prevent inverted range output. `fuzz_sql_norec`
-      currently triggers an `if range.start > range.end` path in
-      `kimberlite-store::btree::scan` that the debug assert surfaces as
-      a planner correctness warning. Release builds clamp to empty, so
-      results are still correct; the v0.6.1 patch disables the assert
-      under `cfg(fuzzing)` to unblock CI. Track down which predicate
-      lowerings emit the inverted range and fix upstream.
-- [ ] **GROUP BY scale ceiling.** `MAX_GROUP_COUNT = 100_000` in
-      `crates/kimberlite-query/src/executor.rs:54` is a hard error
-      rather than a degradation, and aggregation is fully in-memory
-      (`HashMap<Vec<Value>, AggregateState>`). Replace the const with
-      a configurable `aggregate_memory_budget_bytes` (default 256 MiB,
-      ≈ 1M groups), and replace the panic-style error with a
-      structured `AggregateMemoryExceeded { budget, observed }` whose
-      message names the knob. Pushes the ceiling out ~10× without a
-      planner overhaul. Proper spill-to-disk hash aggregate is
-      tracked under Deferred (v0.8.0). Found by: notebar GST report
-      drill-down on `ar_ledger`.
-- [ ] **Expression-index note (no v0.7.0 work).** `CreateIndex.columns`
-      in `crates/kimberlite-kernel/src/command.rs` carries bare
-      column names (`Vec<String>`); expressions like
-      `DATE_TRUNC('month', created_at)` cannot be indexed today.
-      Surfacing this requires an index-definition AST plus an
-      evaluator on the write path — too large for v0.7.0. Tracked
-      under Deferred for v0.8.0 so consumers know not to rely on
-      it. (Equality / range indexes on plain columns already work end
-      to end via `find_usable_indexes` → `IndexScan` in
-      `crates/kimberlite-query/src/planner.rs:1373-1383`.)
-
-### SDK & DX
-
-- [ ] Go SDK — deferred post-v0.4 in README; brings Kimberlite to
-      parity with the TS / Python / Rust trio.
-- [ ] SDK connection-pool metrics + Prometheus exporter parity.
-- [ ] Python SDK typing refresh (PEP 604, Self types, Protocol-based
-      plugins).
-- [ ] **Cookbook examples for already-shipped primitives that
-      downstream consumers keep missing.** Notebar filed gap reports
-      for two features that are already implemented end-to-end —
-      because nothing in `examples/` or the SDK README pointed at
-      them. Ship one runnable TS example per primitive, linked from
-      the SDK README:
-      - **Real-time subscriptions.** `client.subscribe(streamId, {
-        startOffset })` from `sdks/typescript/src/subscription.ts` is
-        an `AsyncIterable<SubscriptionEvent>` with credit-based flow
-        control; wire frame + server handler shipped in earlier v0.x.
-        Notebar still believes the client is pull-only.
-      - **Secondary-index lookup by non-PK column.**
-        `CREATE INDEX ON projection(provider, providerMessageId)`
-        followed by a `SELECT … WHERE provider = ? AND
-        providerMessageId = ?` — the planner already emits
-        `IndexScan` via `find_usable_indexes` /
-        `select_best_index` (`crates/kimberlite-query/src/planner.rs`).
-      - **`recordConsent` round-trip.** Once the v0.6.2 fields
-        (`termsVersion`, `accepted`) land, ensure an example
-        demonstrates the full grant + audit-query flow.
-      Goal: the next consumer integrating Kimberlite finds the
-      answer in `examples/` instead of filing a gap report.
-
-### Testing & verification
-
-- [ ] VOPR workload generators for the v0.6.0 command families —
-      `Masking*`, `Upsert`, `AS OF TIMESTAMP` resolution,
-      `eraseSubject` auto-discovery. Kernel-level correctness is
-      covered by unit + integration tests; this closes the
-      storage-realism + protocol-attack coverage gap documented at
-      `docs-internal/audit/2026-Q2-release-readiness.md`.
-- [ ] Formal-verification specs for scalar-expression purity.
-- [ ] VOPR scenarios for SQL-surface semantics (beyond the Tier 1 / 2
-      scenarios already landed in v0.6.0).
-- [ ] Investigate fuzz-target slow inputs. `fuzz_kernel_command` and
-      `fuzz_abac_evaluator` have corpus entries that take 20+ minutes
-      per iteration on the 2-vCPU GitHub runner. v0.6.1 raised the
-      libFuzzer per-input timeout above the per-target wall-clock
-      budget so these don't false-positive as crashes, but the
-      underlying perf signal is real and worth chasing — either the
-      corpus has accumulated pathological inputs that should be
-      pruned, or there's an O(n^k) blowup in the kernel command
-      apply-path on certain shapes.
-
-### Infrastructure
-
-- [ ] Topological-order validation for `PUBLISH_CRATES` in `justfile`
-      (compare against `cargo metadata`).
-- [ ] Performance re-baseline against current hardware — I/O
-      throughput, consensus latency, SQL query throughput.
-- [ ] GPG-signed release tags by default.
-- [ ] MIRI nightly-lite runtime exceeds the service's
-      `TimeoutStartSec=5400` (90 min). Root cause is MIRI's
-      interpretation overhead on crypto-roundtrip tests (e.g.
-      `encryption::tests::large_plaintext_encryption`) — not a
-      proptest/isolation issue. Consider annotating the heaviest
-      tests with `#[cfg_attr(miri, ignore)]` or narrowing MIRI scope
-      (MIRI's main value is UB via pointer/lifetime interpretation,
-      not arithmetic correctness on AES-GCM). As a stopgap, bump
-      `TimeoutStartSec` to 10800 and accept that the FV/fuzz overlap
-      window will trip `Conflicts=kimberlite-fuzz-nightly.service` —
-      or shift the FV timer earlier so both finish before fuzz fires
-      at 02:00 UTC.
-
----
 
 ## Deferred
 

@@ -19,6 +19,24 @@ _Accretion slot for v0.10.0 work. See [`ROADMAP.md`](./ROADMAP.md)
 for planned scope (Firecracker/KVM multi-node DST, KMS production
 backends, geo-fencing enforcement, full X12 837 loop schemas)._
 
+### Post-v0.9.0 stragglers (on `main`, will appear in v0.10.0 or
+### a v0.9.1 patch)
+
+- **CI gate fix** — bump `tla2tools.jar` SHA-256 in
+  `.github/workflows/formal-verification.yml` to match upstream's
+  v1.8.0 asset rebuild (digest changed from `e47073579d0f…` to
+  `25780ac9578e…`). Standard maintenance against the TLA+ Toolbox
+  CI republishing the jar every few weeks. (`ef5cdb3`)
+- **Python SDK version bump** — `sdks/python/pyproject.toml`
+  was at `0.8.0` because the Python SDK has its own version pin
+  (not workspace-tied). Bumped to `0.9.0`; PyPI publish triggered
+  via `gh workflow run sdk-python.yml --ref main`. Also dropped a
+  stray JVM crash log under `sdks/java/`. (`dd2f703`)
+- **ROADMAP cleanup** — moved v0.9.0 from "in-flight" to
+  "Released", added a real `v0.10.0 — in-flight` section with the
+  4 healthcare-pivot-deferred items + 7 carried-over items, and
+  deleted the duplicate stale v0.7.0 planning block.
+
 ## [0.9.0] — 2026-05-18
 
 The healthcare-only release. Kimberlite is no longer positioned as a
