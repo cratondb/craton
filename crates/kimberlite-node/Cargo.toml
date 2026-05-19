@@ -22,7 +22,7 @@ kimberlite-wire.workspace = true
 
 # napi-rs
 napi = { version = "2.16", default-features = false, features = ["napi8", "async", "tokio_rt", "serde-json", "error_anyhow"] }
-napi-derive = "2.16"
+napi-derive = "3.5"
 
 # Async runtime (required by napi tokio_rt)
 tokio = { workspace = true }
