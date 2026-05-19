@@ -111,7 +111,7 @@ subtle = "2.6.1"
 aes-gcm = { version = "0.10", features = ["aes"] }
 hkdf = "0.12"
 hmac = "0.12"
-sha2 = "0.10"  # asm feature disabled for Windows compatibility
+sha2 = "0.11"  # asm feature disabled for Windows compatibility
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
