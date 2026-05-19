@@ -166,7 +166,7 @@ rayon = "1.12"
 crossbeam-queue = "0.3"
 
 # Compression
-lz4_flex = "0.12"
+lz4_flex = "0.13"
 zstd = "0.13"
 
 # Archiving (cluster backup / restore — T2.2)
