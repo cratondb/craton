@@ -16,7 +16,7 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 # Sync HTTP client for invariant probes — no tokio footprint.
-ureq = { version = "2", default-features = false }
+ureq = { version = "3", default-features = false }
 
 [dev-dependencies]
 tempfile.workspace = true
