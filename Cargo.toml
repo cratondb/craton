@@ -109,7 +109,7 @@ getrandom = "0.4.2"
 zeroize = { version = "1.8.2", features = ["zeroize_derive"] }
 subtle = "2.6.1"
 aes-gcm = { version = "0.10", features = ["aes"] }
-hkdf = "0.12"
+hkdf = "0.13"
 hmac = "0.12"
 sha2 = "0.10"  # asm feature disabled for Windows compatibility
 
