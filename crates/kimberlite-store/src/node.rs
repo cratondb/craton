@@ -264,7 +264,26 @@ impl LeafNode {
     }
 
     /// Writes the leaf node to a page.
+    ///
+    /// v0.9.1 — promotes the generic `PageOverflow` to a typed
+    /// `EntryTooLarge` when a *single* leaf entry can't fit on a page
+    /// by itself. That case happens when one key's MVCC version chain
+    /// has grown so long that even an empty leaf can't hold it; the
+    /// surrounding split-on-byte-budget logic in
+    /// [`crate::btree::BTree::insert_into_leaf`] is unable to save
+    /// it because both halves of an empty / single-entry split still
+    /// contain the same fat entry. Surfacing the offending key gives
+    /// the SDK / operator something to act on.
     pub fn to_page(&self, page: &mut Page) -> Result<(), StoreError> {
+        // Per-page byte budget (header + CRC reserved). Hoisted to the
+        // top of the function so clippy's `items_after_statements`
+        // doesn't trip — these are pure compile-time constants used
+        // by the overflow check below.
+        const SLOT_SIZE: usize = 4;
+        let page_budget =
+            crate::types::PAGE_SIZE - crate::types::PAGE_HEADER_SIZE - crate::types::CRC_SIZE;
+        let next_leaf_overhead = SLOT_SIZE + 8;
+
         debug_assert_eq!(page.page_type(), PageType::Leaf, "expected leaf page");
 
         // Clear existing items (rebuild from scratch)
@@ -279,8 +298,30 @@ impl LeafNode {
         };
         page.insert_item(0, &next_leaf_bytes)?;
 
-        // Insert entries
+        // Insert entries. Detect the single-entry-too-large case up
+        // front so the error carries the offending key.
         for (i, entry) in self.entries.iter().enumerate() {
+            let entry_size = entry.serialized_size();
+            // The largest possible budget any one entry can claim is
+            // `page_budget - next_leaf_overhead - SLOT_SIZE` (its own
+            // slot). If that's exceeded, no split — degenerate or
+            // otherwise — can rescue this write.
+            let max_entry_capacity = page_budget
+                .saturating_sub(next_leaf_overhead)
+                .saturating_sub(SLOT_SIZE);
+            if entry_size > max_entry_capacity {
+                tracing::error!(
+                    key = ?entry.key,
+                    entry_size,
+                    page_budget,
+                    "B+tree leaf entry exceeds page byte budget; MVCC version chain has grown unbounded"
+                );
+                return Err(StoreError::EntryTooLarge {
+                    key: entry.key.clone(),
+                    entry_size,
+                    page_budget,
+                });
+            }
             let data = entry.serialize();
             page.insert_item(i + 1, &data)?;
         }

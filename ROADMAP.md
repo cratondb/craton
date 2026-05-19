@@ -13,7 +13,23 @@ Detail for each planned feature lives in GitHub issues.
 
 ## Status
 
-**Current release:** `v0.9.0` (2026-05-18) — healthcare-pivot
+**Current release:** `v0.9.1` (2026-05-20) — patch release for two
+upstream bugs notebar surfaced during the v0.8.0 → v0.9.0 upgrade.
+Both were silent data-corruption / silent-write failure modes
+promoted to typed, actionable errors at the wire and SDK layer:
+(1) `StreamId::from_tenant_and_local` silently truncating tenant ids
+above `u32::MAX` (notebar tripped it on macOS PIDs > 2^15) — fixed
+with `try_from_tenant_and_local` + new
+`KimberliteError::TenantIdTooLarge` + wire
+`ErrorCode::TenantIdTooLarge = 30` + TS `TenantIdTooLargeError`
+class; (2) B+tree single-entry overflow when a hot row's MVCC
+version chain outgrows the page budget — fixed with typed
+`StoreError::EntryTooLarge` (carrying offending key + sizes) + wire
+`ErrorCode::RowVersionChainTooLarge = 31` + TS
+`RowVersionChainTooLargeError` class. See [`CHANGELOG.md`] for full
+details.
+
+**Prior release:** `v0.9.0` (2026-05-18) — healthcare-pivot
 release. Kimberlite is now positioned exclusively as a verifiable
 database for healthcare (EHR / payer-RCM / clinical research /
 digital health), with GDPR / SOC 2 / ISO 27001 / FedRAMP as overlay

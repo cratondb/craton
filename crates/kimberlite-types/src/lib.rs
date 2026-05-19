@@ -93,6 +93,44 @@ impl From<TenantId> for u64 {
     }
 }
 
+/// Maximum tenant id that fits inside a `StreamId`'s upper 32 bits.
+///
+/// `StreamId` encodes `(tenant_id << 32) | local_id` into a single
+/// `u64`. The encoding loses information for `tenant_id > u32::MAX` —
+/// two such tenants whose lower 32 bits collide produce the same
+/// `StreamId`, which silently corrupts every per-tenant filter
+/// downstream (kernel state, audit log, projection store, replication
+/// addressing).
+///
+/// Callers building `StreamId`s from caller-supplied `TenantId` values
+/// (SDK boundary, wire deserialisation, fuzz inputs, test harnesses)
+/// MUST validate against this ceiling. Use
+/// [`StreamId::try_from_tenant_and_local`] for the fallible path; the
+/// infallible [`StreamId::from_tenant_and_local`] is for callers that
+/// can structurally prove the tenant id fits.
+pub const MAX_TENANT_ID_FOR_STREAM_ID: u64 = u32::MAX as u64;
+
+/// Error encoding a [`StreamId`] from `(tenant_id, local_id)`.
+///
+/// Surfaces when caller-supplied bits don't fit the bit-packed `u64`
+/// layout. The single variant today is overflow on `tenant_id`; future
+/// encoding changes (e.g. a wider `StreamId`) would extend this enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum StreamIdEncodingError {
+    /// The provided `tenant_id` does not fit in 32 bits and would be
+    /// silently truncated by the bit-packed `StreamId` layout.
+    #[error(
+        "tenant_id {tenant_id} exceeds the StreamId encoding limit of {max}; the encoding silently \
+         truncates which corrupts per-tenant filtering. Keep tenant ids ≤ u32::MAX."
+    )]
+    TenantIdTooLarge {
+        /// The offending tenant id.
+        tenant_id: u64,
+        /// The encoding limit ([`MAX_TENANT_ID_FOR_STREAM_ID`]).
+        max: u64,
+    },
+}
+
 /// Unique identifier for a stream within the system.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
@@ -104,11 +142,27 @@ impl StreamId {
         Self(id)
     }
 
-    /// Creates stream ID from tenant ID and local stream number.
+    /// Creates a stream id from tenant id and local stream number.
     ///
     /// **Bit Layout**:
-    /// - Upper 32 bits: `tenant_id` (supports 4.3B tenants)
+    /// - Upper 32 bits: `tenant_id` (must fit in u32 — see
+    ///   [`MAX_TENANT_ID_FOR_STREAM_ID`])
     /// - Lower 32 bits: `local_stream_id` (4.3B streams per tenant)
+    ///
+    /// Use this when `tenant_id` is structurally known to fit in
+    /// 32 bits (compile-time constants in tests, internally-allocated
+    /// ids whose upper bound the kernel controls). Prefer
+    /// [`Self::try_from_tenant_and_local`] for any caller that
+    /// receives `tenant_id` from outside (SDK, wire, fuzz, test
+    /// harness).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `tenant_id > u32::MAX`. The bit-packed layout would
+    /// otherwise silently truncate the upper bits and corrupt every
+    /// per-tenant filter downstream. This panic is loud-by-design so
+    /// the encoding contract surfaces at the call site rather than as
+    /// mysterious cross-tenant data corruption later.
     ///
     /// # Examples
     ///
@@ -118,10 +172,59 @@ impl StreamId {
     /// assert_eq!(u64::from(stream_id), 21474836481); // (5 << 32) | 1
     /// assert_eq!(TenantId::from_stream_id(stream_id), TenantId::from(5));
     /// ```
+    #[track_caller]
     pub fn from_tenant_and_local(tenant_id: TenantId, local_id: u32) -> Self {
-        let tenant_bits = u64::from(tenant_id) << 32;
+        Self::try_from_tenant_and_local(tenant_id, local_id).expect(
+            "StreamId::from_tenant_and_local: tenant_id exceeds u32::MAX — use try_from_tenant_and_local for fallible construction",
+        )
+    }
+
+    /// Fallible counterpart to [`Self::from_tenant_and_local`].
+    ///
+    /// Returns [`StreamIdEncodingError::TenantIdTooLarge`] if the
+    /// `tenant_id` does not fit in 32 bits — the bit-packed `StreamId`
+    /// layout would silently truncate the upper bits and corrupt
+    /// per-tenant filtering.
+    ///
+    /// This is the correct entry point for any caller that receives
+    /// `tenant_id` from a non-kernel source (SDK adapter, wire
+    /// deserialisation, fuzz harness, test factory).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StreamIdEncodingError::TenantIdTooLarge`] when
+    /// `u64::from(tenant_id) > u32::MAX`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use kimberlite_types::{TenantId, StreamId, StreamIdEncodingError};
+    /// // Valid: tenant id fits in u32.
+    /// let ok = StreamId::try_from_tenant_and_local(TenantId::from(5), 1)
+    ///     .expect("5 fits in u32");
+    /// assert_eq!(ok.local_id(), 1);
+    ///
+    /// // Invalid: tenant id overflows u32.
+    /// let err = StreamId::try_from_tenant_and_local(
+    ///     TenantId::from(u64::from(u32::MAX) + 1),
+    ///     0,
+    /// );
+    /// assert!(matches!(err, Err(StreamIdEncodingError::TenantIdTooLarge { .. })));
+    /// ```
+    pub fn try_from_tenant_and_local(
+        tenant_id: TenantId,
+        local_id: u32,
+    ) -> Result<Self, StreamIdEncodingError> {
+        let tenant_raw = u64::from(tenant_id);
+        if tenant_raw > MAX_TENANT_ID_FOR_STREAM_ID {
+            return Err(StreamIdEncodingError::TenantIdTooLarge {
+                tenant_id: tenant_raw,
+                max: MAX_TENANT_ID_FOR_STREAM_ID,
+            });
+        }
+        let tenant_bits = tenant_raw << 32;
         let local_bits = u64::from(local_id);
-        StreamId::from(tenant_bits | local_bits)
+        Ok(StreamId::from(tenant_bits | local_bits))
     }
 
     /// Extracts local stream ID (lower 32 bits).

@@ -1596,6 +1596,38 @@ pub enum ErrorCode {
     /// typed error class without parsing message strings. Notebar's
     /// webhook-dedup loop is the canonical consumer.
     UniqueConstraintViolation = 29,
+
+    /// Tenant id exceeds the `StreamId` encoding limit (u32::MAX).
+    ///
+    /// `StreamId` is a bit-packed `u64` with the tenant id in the upper
+    /// 32 bits. A tenant id above that ceiling silently truncates the
+    /// upper bits and corrupts per-tenant filtering downstream
+    /// (kernel state, audit log, projection store, replication). v0.9.1
+    /// adds this error code so the SDK can present a clear, actionable
+    /// failure instead of a misleading `StreamAlreadyExists` later in
+    /// the flow.
+    ///
+    /// Triggered by notebar's `nextTenantId()` on macOS PIDs > 2^15;
+    /// the canonical mitigation is on the caller side (mask the PID to
+    /// fit u32). See `docs/operating/kimberlite-upstream-queue.md`.
+    TenantIdTooLarge = 30,
+
+    /// A single B+tree leaf entry (one key + its MVCC version chain)
+    /// has outgrown the page byte budget. Splitting can't save the
+    /// write because both halves of a split would still hold the same
+    /// fat entry. Caused by repeated upsert-in-place on the same
+    /// primary key — every overwrite appends a version, so a hot row
+    /// updated dozens of times accumulates a chain that no longer
+    /// fits.
+    ///
+    /// v0.9.0 returned the generic [`Self::StorageError`] for this
+    /// case ("page overflow: need N bytes, have M"), which gave SDK
+    /// callers no actionable signal. v0.9.1 promotes it to a typed
+    /// code so the SDK can render a clear error pointing at the hot
+    /// row and the operator can decide between rate-limiting writes
+    /// on that key, rotating keys, or waiting for v0.10.0's
+    /// retention-horizon compaction.
+    RowVersionChainTooLarge = 31,
 }
 
 /// Handshake response.

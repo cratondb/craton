@@ -33,6 +33,8 @@ export type ErrorCode =
   | 'ApiKeyNotFound'
   | 'TenantAlreadyExists'
   | 'UniqueConstraintViolation'
+  | 'TenantIdTooLarge'
+  | 'RowVersionChainTooLarge'
   // Client-side synthetic codes (no wire counterpart):
   | 'Connection'
   | 'Timeout'
@@ -194,6 +196,55 @@ export class UniqueConstraintViolationError extends KimberliteError {
 }
 
 /**
+ * The connection's tenant id exceeds the StreamId encoding ceiling
+ * (`u32::MAX`).
+ *
+ * `StreamId` is a bit-packed `u64` with the tenant id in the upper 32
+ * bits — values above that range silently truncate and corrupt
+ * per-tenant filtering. v0.9.1 added an explicit reject at the server
+ * boundary so callers see this typed error instead of a downstream
+ * `StreamAlreadyExists`.
+ *
+ * Surfaced by notebar on macOS PIDs > 2^15 (where the
+ * `pid << 16 + counter` tenant-id scheme overflowed u32). Fix on the
+ * caller side: keep tenant ids ≤ `u32::MAX` (≈ 4.29 × 10⁹).
+ */
+export class TenantIdTooLargeError extends KimberliteError {
+  constructor(message: string) {
+    super(message, 'TenantIdTooLarge');
+    this.name = 'TenantIdTooLargeError';
+    Object.setPrototypeOf(this, TenantIdTooLargeError.prototype);
+  }
+}
+
+/**
+ * A single row's MVCC version chain has grown beyond the page byte
+ * budget, so the B+tree cannot store further versions of this key.
+ *
+ * Every overwrite of a primary key appends a version to that key's
+ * MVCC chain. A hot row updated dozens of times can outgrow the page
+ * (4 KiB). Splitting can't help — both halves of a single-entry
+ * "split" still contain the same fat entry. v0.9.1 added this typed
+ * error to surface the offending key + size; v0.9.0 returned a
+ * generic `StorageError` ("page overflow: need N bytes, have M").
+ *
+ * Mitigation paths until v0.10.0 ships retention-horizon compaction:
+ *  - **Rate-limit writes** on the hot key (combine many small
+ *    upserts into one).
+ *  - **Rotate keys** (e.g. `patient_current_v{N}` where N flips
+ *    every K writes) so version chains stay bounded per key.
+ *  - **Use the event stream** as the source of truth and rebuild
+ *    projections from a checkpoint when chains get large.
+ */
+export class RowVersionChainTooLargeError extends KimberliteError {
+  constructor(message: string) {
+    super(message, 'RowVersionChainTooLarge');
+    this.name = 'RowVersionChainTooLargeError';
+    Object.setPrototypeOf(this, RowVersionChainTooLargeError.prototype);
+  }
+}
+
+/**
  * A generic server-side error that doesn't map to a more specific subclass.
  * The `code` property exposes the wire error-code tag for inspection.
  */
@@ -255,6 +306,10 @@ function constructTypedError(code: ErrorCode, message: string): KimberliteError 
       return new NotLeaderError(message);
     case 'UniqueConstraintViolation':
       return new UniqueConstraintViolationError(message);
+    case 'TenantIdTooLarge':
+      return new TenantIdTooLargeError(message);
+    case 'RowVersionChainTooLarge':
+      return new RowVersionChainTooLargeError(message);
     case 'TenantNotFound':
     case 'TableNotFound':
     case 'StreamAlreadyExists':

@@ -13,6 +13,7 @@ workspace = true
 serde.workspace = true
 bytes.workspace = true
 getrandom.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

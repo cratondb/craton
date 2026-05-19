@@ -2150,6 +2150,8 @@ fn error_code_tag(code: ErrorCode) -> &'static str {
         ErrorCode::BreachNotFound => "BreachNotFound",
         ErrorCode::ExportNotFound => "ExportNotFound",
         ErrorCode::UniqueConstraintViolation => "UniqueConstraintViolation",
+        ErrorCode::TenantIdTooLarge => "TenantIdTooLarge",
+        ErrorCode::RowVersionChainTooLarge => "RowVersionChainTooLarge",
     }
 }
 

@@ -2887,7 +2887,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "bytes",
  "chrono",
@@ -2915,7 +2915,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-abac"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "chrono",
  "kimberlite-types",
@@ -2928,7 +2928,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-admin"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2939,7 +2939,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-agent-protocol"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "proptest",
  "serde",
@@ -2949,7 +2949,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-bench"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -2970,7 +2970,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-chaos"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2982,14 +2982,14 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-chaos-shim"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "kimberlite-cli"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3026,7 +3026,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-client"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3047,7 +3047,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-cluster"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -3064,7 +3064,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-compliance"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3088,7 +3088,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-config"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "config",
@@ -3101,7 +3101,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-crypto"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "aes-gcm",
  "blake3",
@@ -3119,7 +3119,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-dev"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "indicatif",
@@ -3137,7 +3137,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-directory"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "kimberlite-types",
  "postcard",
@@ -3151,7 +3151,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-doc-tests"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "doc-comment",
  "kimberlite-crypto",
@@ -3161,7 +3161,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-event-sourcing"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "proptest",
  "serde",
@@ -3171,7 +3171,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-ffi"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "cbindgen",
  "kimberlite-client",
@@ -3185,7 +3185,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-fhir"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "chrono",
  "proptest",
@@ -3196,7 +3196,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-fhir-store"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "chrono",
  "kimberlite-compliance",
@@ -3212,7 +3212,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-hl7v2"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "proptest",
  "serde",
@@ -3221,7 +3221,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-io"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "bytes",
  "libc",
@@ -3231,7 +3231,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-kernel"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "blake3",
  "bytes",
@@ -3246,7 +3246,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-mcp"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3264,7 +3264,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-migration"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3278,7 +3278,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-node"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "kimberlite-client",
  "kimberlite-types",
@@ -3291,7 +3291,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-oracle"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "bytes",
  "duckdb",
@@ -3302,14 +3302,14 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-properties"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "kimberlite-query"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3331,7 +3331,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-rbac"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "blake3",
  "chrono",
@@ -3347,7 +3347,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-server"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3387,7 +3387,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-sharing"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "chrono",
  "kimberlite-crypto",
@@ -3401,7 +3401,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-sim"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "askama",
  "axum",
@@ -3436,7 +3436,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-sim-macros"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3445,7 +3445,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-storage"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "bytes",
  "kimberlite-crypto",
@@ -3464,7 +3464,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-store"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "bytes",
  "kimberlite-crypto",
@@ -3473,11 +3473,12 @@ dependencies = [
  "tempfile",
  "test-case",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
 name = "kimberlite-studio"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3500,7 +3501,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-test-harness"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "criterion",
  "kimberlite",
@@ -3515,7 +3516,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-types"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "bytes",
  "getrandom 0.4.2",
@@ -3523,11 +3524,12 @@ dependencies = [
  "serde",
  "serde_json",
  "test-case",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "kimberlite-vsr"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "bytes",
  "crossbeam-queue",
@@ -3555,7 +3557,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-wire"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "bytes",
  "kimberlite-crypto",
@@ -3568,7 +3570,7 @@ dependencies = [
 
 [[package]]
 name = "kimberlite-x12"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "serde",
  "thiserror 2.0.18",

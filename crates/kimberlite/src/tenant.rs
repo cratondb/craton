@@ -213,6 +213,21 @@ impl TenantHandle {
         name: impl Into<String>,
         data_class: DataClass,
     ) -> Result<StreamId> {
+        // v0.9.1 — reject tenant ids that don't fit the StreamId
+        // encoding (upper 32 bits) up-front, before allocating any
+        // resources. Before the fix this surfaced downstream as a
+        // mysterious `StreamAlreadyExists` because the truncated
+        // upper-32 collapsed two distinct tenants onto the same
+        // slot. Notebar tripped it on macOS PIDs > 2^15 — see
+        // commit message + CHANGELOG.
+        let tenant_raw = u64::from(self.tenant_id);
+        if tenant_raw > kimberlite_types::MAX_TENANT_ID_FOR_STREAM_ID {
+            return Err(KimberliteError::TenantIdTooLarge {
+                tenant_id: tenant_raw,
+                max: kimberlite_types::MAX_TENANT_ID_FOR_STREAM_ID,
+            });
+        }
+
         let stream_name = StreamName::new(name);
 
         // Idempotent by stream_name: if a stream with this name already
@@ -278,7 +293,14 @@ impl TenantHandle {
         let next = max_local
             .checked_add(1)
             .ok_or_else(|| KimberliteError::internal("tenant stream-id space exhausted"))?;
-        Ok(StreamId::from_tenant_and_local(self.tenant_id, next))
+        // The `create_stream` entry point already rejects tenant ids
+        // that don't fit the encoding, so this fallible call is
+        // structurally infallible here. We still use the fallible
+        // path so a future caller that bypasses `create_stream`
+        // doesn't silently corrupt the StreamId encoding. The
+        // `?` operator surfaces the typed error through
+        // `From<StreamIdEncodingError> for KimberliteError`.
+        Ok(StreamId::try_from_tenant_and_local(self.tenant_id, next)?)
     }
 
     /// Creates a stream with automatic ID allocation.
@@ -5779,6 +5801,136 @@ mod tests {
         assert!(
             result.is_ok(),
             "DROP TABLE IF EXISTS on a missing table must be a no-op, got: {result:?}"
+        );
+    }
+
+    /// Notebar v0.9.1 — silent u32 truncation in
+    /// `StreamId::from_tenant_and_local` corrupted per-tenant filtering
+    /// when `tenant_id > u32::MAX`. The encoding packs tenant_id into
+    /// the upper 32 bits of a u64 `StreamId`; values above that range
+    /// silently lost the upper bits, collapsing two distinct tenants
+    /// onto the same StreamId slot and producing a misleading
+    /// `StreamAlreadyExists` later in the flow.
+    ///
+    /// Notebar tripped it on macOS PIDs > 2^15 (the
+    /// `pid << 16 + counter` tenant-id scheme overflowed u32). Fix:
+    /// reject overflow up-front with a typed
+    /// `KimberliteError::TenantIdTooLarge` so callers get an
+    /// actionable failure instead of cross-tenant corruption.
+    #[test]
+    fn test_create_stream_rejects_tenant_id_above_u32_max() {
+        let dir = tempdir().unwrap();
+        let db = Kimberlite::open(dir.path()).unwrap();
+
+        // `u32::MAX + 1` is the smallest overflowing tenant id.
+        let tenant_id = TenantId::new(u64::from(u32::MAX) + 1);
+        let tenant = db.tenant(tenant_id);
+
+        let err = tenant
+            .create_stream("anything", DataClass::PHI)
+            .expect_err("create_stream must reject tenant_id > u32::MAX");
+
+        match err {
+            KimberliteError::TenantIdTooLarge {
+                tenant_id: got,
+                max,
+            } => {
+                assert_eq!(got, u64::from(u32::MAX) + 1);
+                assert_eq!(max, u64::from(u32::MAX));
+            }
+            other => panic!("expected TenantIdTooLarge, got: {other:?}"),
+        }
+    }
+
+    /// Boundary test — `tenant_id == u32::MAX` is the largest value the
+    /// `StreamId` encoding can accommodate without truncation. Must
+    /// succeed cleanly.
+    #[test]
+    fn test_create_stream_accepts_tenant_id_at_u32_max() {
+        let dir = tempdir().unwrap();
+        let db = Kimberlite::open(dir.path()).unwrap();
+
+        let tenant_id = TenantId::new(u64::from(u32::MAX));
+        let tenant = db.tenant(tenant_id);
+
+        let stream_id = tenant
+            .create_stream("boundary_test", DataClass::PHI)
+            .expect("create_stream must accept tenant_id == u32::MAX");
+
+        assert_eq!(
+            stream_id.tenant_id(),
+            tenant_id,
+            "encoding must round-trip at the boundary"
+        );
+    }
+
+    /// Notebar v0.9.0 upgrade blocker.
+    ///
+    /// After provisioning a fresh tenant by issuing a `CREATE TABLE` (which
+    /// auto-allocates a backing event stream via the kernel's global
+    /// `next_stream_id` counter), the next `tenant.create_stream(name, …)`
+    /// for an *explicit* application-level stream must succeed.
+    ///
+    /// Notebar's `ensureTenant(tid)` runs `CREATE TABLE patient_current …`
+    /// for projection tables; then `ensureStream("organisation_events", …)`
+    /// is the first thing every repo does. Before the v0.9.1 fix this
+    /// second call failed with `StreamIdUniqueConstraint` because
+    /// `allocate_local_stream_id` walked
+    /// `kernel_state.streams().filter(|s| s.tenant_id() == self.tenant_id)`
+    /// and found 0 streams (the CREATE-TABLE-allocated backing stream was
+    /// auto-id'd from the global counter, which encodes as
+    /// `tenant_id=0` for the first few allocations rather than the
+    /// requesting tenant). It therefore returned `local_id=1` — but a
+    /// prior tenant's explicit `(tenant<<32)|1` stream had already
+    /// claimed that slot, or the backing stream's auto-id had walked the
+    /// counter past `(this_tenant<<32)|1`. Both shapes fail this test.
+    #[test]
+    fn test_create_stream_after_create_table_does_not_collide() {
+        let dir = tempdir().unwrap();
+        let db = Kimberlite::open(dir.path()).unwrap();
+
+        // Use a non-trivial tenant id, the way notebar's `nextTenantId()`
+        // produces them. Picking 1473429504 (== 0x57D63000) reproduces
+        // the exact failure ID notebar reported (6328829065948037121 ==
+        // 0x57D63000_00000001).
+        let tenant_id = TenantId::new(1_473_429_504);
+        let tenant = db.tenant(tenant_id);
+
+        // Step 1 — provision a projection table. CREATE TABLE
+        // auto-allocates a backing event stream behind the scenes via
+        // `state.with_new_stream`, which uses the global
+        // `next_stream_id` counter, not the tenant's local namespace.
+        tenant
+            .execute(
+                "CREATE TABLE patient_current (id BIGINT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (id))",
+                &[],
+            )
+            .expect("CREATE TABLE on a fresh tenant must succeed");
+
+        // Step 2 — create an application-level stream by name. This is
+        // the first thing notebar's repos do. Before the fix this failed
+        // with `StreamIdUniqueConstraint` against
+        // `(tenant_id << 32) | 1`.
+        let stream_id = tenant
+            .create_stream("organisation_events", DataClass::PHI)
+            .expect("create_stream after CREATE TABLE must not collide on stream-id slot");
+
+        // Postcondition: the returned StreamId carries this tenant's
+        // encoding (upper 32 bits == tenant_id).
+        assert_eq!(
+            stream_id.tenant_id(),
+            tenant_id,
+            "explicit application stream must be encoded under this tenant"
+        );
+
+        // Step 3 — idempotency must still hold. A second call by the
+        // same name returns the same StreamId.
+        let stream_id_2 = tenant
+            .create_stream("organisation_events", DataClass::PHI)
+            .expect("create_stream must be idempotent by name");
+        assert_eq!(
+            stream_id, stream_id_2,
+            "idempotent create_stream must return the same id"
         );
     }
 

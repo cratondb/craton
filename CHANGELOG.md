@@ -19,23 +19,81 @@ _Accretion slot for v0.10.0 work. See [`ROADMAP.md`](./ROADMAP.md)
 for planned scope (Firecracker/KVM multi-node DST, KMS production
 backends, geo-fencing enforcement, full X12 837 loop schemas)._
 
-### Post-v0.9.0 stragglers (on `main`, will appear in v0.10.0 or
-### a v0.9.1 patch)
+## [0.9.1] — 2026-05-20
 
-- **CI gate fix** — bump `tla2tools.jar` SHA-256 in
-  `.github/workflows/formal-verification.yml` to match upstream's
-  v1.8.0 asset rebuild (digest changed from `e47073579d0f…` to
-  `25780ac9578e…`). Standard maintenance against the TLA+ Toolbox
-  CI republishing the jar every few weeks. (`ef5cdb3`)
-- **Python SDK version bump** — `sdks/python/pyproject.toml`
-  was at `0.8.0` because the Python SDK has its own version pin
-  (not workspace-tied). Bumped to `0.9.0`; PyPI publish triggered
-  via `gh workflow run sdk-python.yml --ref main`. Also dropped a
-  stray JVM crash log under `sdks/java/`. (`dd2f703`)
-- **ROADMAP cleanup** — moved v0.9.0 from "in-flight" to
-  "Released", added a real `v0.10.0 — in-flight` section with the
-  4 healthcare-pivot-deferred items + 7 carried-over items, and
-  deleted the duplicate stale v0.7.0 planning block.
+Patch release for two upstream bugs notebar surfaced while upgrading
+from v0.8.0 → v0.9.0. Both are silent data-corruption / silent-write
+failure modes promoted to typed, actionable errors at the wire and
+SDK layer.
+
+### Fixed
+
+- **`StreamId` u32 truncation contract.** `StreamId::from_tenant_and_local`
+  packs `tenant_id` into the upper 32 bits of a `u64` and silently
+  truncated values above `u32::MAX`. Two tenants whose ids collided in
+  the lower 32 bits collapsed onto the same `StreamId`, producing a
+  misleading `StreamAlreadyExists` later in the flow (or — worse —
+  cross-tenant data leak through any per-tenant filter that consumed
+  `StreamId.tenant_id()`). Notebar tripped it on macOS PIDs > 2^15
+  where the `pid << 16 + counter` tenant-id scheme overflowed u32.
+  - New `kimberlite_types::StreamIdEncodingError` + `pub const
+    MAX_TENANT_ID_FOR_STREAM_ID` documenting the encoding ceiling.
+  - New `StreamId::try_from_tenant_and_local() -> Result<_, _>`
+    fallible constructor for any caller that receives `tenant_id`
+    from outside (SDK boundary, wire deserialisation, fuzz harness).
+  - Existing `StreamId::from_tenant_and_local` kept as a
+    `#[track_caller]` shim that panics on overflow (debug builds
+    catch it loudly; production gets a clear panic message instead
+    of silent truncation).
+  - `tenant.create_stream` rejects overflow up-front with the new
+    typed `KimberliteError::TenantIdTooLarge { tenant_id, max }`.
+  - New wire `ErrorCode::TenantIdTooLarge = 30` mapped through the
+    server handler.
+  - TS SDK exposes `TenantIdTooLargeError` typed class.
+  - Tests: `test_create_stream_rejects_tenant_id_above_u32_max` +
+    `test_create_stream_accepts_tenant_id_at_u32_max` boundary pair.
+- **B+tree single-entry overflow → typed error.** When the same
+  primary key is upserted many times the row's MVCC version chain
+  grows unbounded. A hot row updated dozens of times accumulates a
+  `LeafEntry` whose `serialized_size` exceeds the page byte budget
+  (4096 − header − CRC = 4048). `bcba460` added byte-budget splitting
+  for the *many-rows* case but couldn't help the *one-fat-row* case
+  — both halves of any split still hold the same fat entry. v0.9.0
+  surfaced it as the generic `StoreError::PageOverflow` ("page
+  overflow: need 4195 bytes, have 4048") which gave SDK callers no
+  actionable signal; notebar's seed loop was silently dropping
+  writes.
+  - New typed `StoreError::EntryTooLarge { key, entry_size,
+    page_budget }` variant carrying the offending key + sizes.
+  - `LeafNode::to_page` detects the case up-front (before any
+    partial write) and emits a `tracing::error!` so operators see
+    it even if a caller swallows the error.
+  - New wire `ErrorCode::RowVersionChainTooLarge = 31`.
+  - TS SDK exposes `RowVersionChainTooLargeError` typed class with
+    mitigation guidance (rate-limit hot keys, rotate keys, use the
+    event stream as source of truth) — proper version-chain
+    compaction driven by a retention horizon is v0.10.0 work.
+  - Test: `test_same_key_many_versions_does_not_silently_drop`.
+
+### Maintenance
+
+- `tla2tools.jar` SHA-256 bump in `.github/workflows/formal-verification.yml`
+  to track upstream's v1.8.0 asset rebuild (was `e47073579d0f…`,
+  now `25780ac9578e…`). The TLA+ Toolbox CI republishes the jar
+  every few weeks; pin updated to match the API-reported digest.
+  (`ef5cdb3`)
+- ROADMAP.md restructured: v0.9.0 moved from "in-flight" to
+  "Released" with completion markers; new "v0.10.0 — in-flight"
+  section scopes the four healthcare-pivot-deferred items
+  (Firecracker DST, KMS production backends, geo-fencing
+  enforcement, full X12 837 claim-loop schemas) plus the seven
+  carried-over items (Go SDK Phase 1, plan-time time-fold,
+  remaining v0.7.0 scaffolds, pool metrics parity, Python parity,
+  Rust audit.subscribe, reference-hardware perf baselines); the
+  stale duplicate v0.7.0 planning block was deleted. (`7576d0b`)
+- Python SDK `pyproject.toml` version bumped to 0.9.0 (was missed
+  in the initial v0.9.0 sweep because the Python SDK has its own
+  pin, not workspace-tied). (`dd2f703`)
 
 ## [0.9.0] — 2026-05-18
 

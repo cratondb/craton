@@ -19,6 +19,7 @@ kimberlite-types.workspace = true
 kimberlite-crypto.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

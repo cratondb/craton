@@ -7,7 +7,7 @@ use kimberlite_kernel::KernelError;
 use kimberlite_query::QueryError;
 use kimberlite_storage::StorageError;
 use kimberlite_store::StoreError;
-use kimberlite_types::{Offset, StreamId, TenantId};
+use kimberlite_types::{Offset, StreamId, StreamIdEncodingError, TenantId};
 use thiserror::Error;
 
 /// Result type for Kimberlite operations.
@@ -35,6 +35,20 @@ pub enum KimberliteError {
     /// Tenant not found.
     #[error("tenant not found: {0:?}")]
     TenantNotFound(TenantId),
+
+    /// Tenant id is too large to encode inside a `StreamId`.
+    ///
+    /// `StreamId` is a bit-packed `u64` with the tenant id in the upper
+    /// 32 bits, so tenant ids beyond `u32::MAX` silently truncate and
+    /// corrupt per-tenant filtering. This variant surfaces the limit at
+    /// the call site (server handshake, `tenant.create_stream`) instead
+    /// of letting a downstream component report a mysterious
+    /// `StreamAlreadyExists` or cross-tenant data leak.
+    #[error(
+        "tenant_id {tenant_id} exceeds the StreamId encoding limit of {max}; tenant ids must be <= u32::MAX. \
+         Reduce tenant_id below {max} (see kimberlite_types::MAX_TENANT_ID_FOR_STREAM_ID)."
+    )]
+    TenantIdTooLarge { tenant_id: u64, max: u64 },
 
     /// Stream not found.
     #[error("stream not found: {0}")]
@@ -74,5 +88,15 @@ impl KimberliteError {
     /// Creates a configuration error with the given message.
     pub fn config(msg: impl Into<String>) -> Self {
         Self::Config(msg.into())
+    }
+}
+
+impl From<StreamIdEncodingError> for KimberliteError {
+    fn from(e: StreamIdEncodingError) -> Self {
+        match e {
+            StreamIdEncodingError::TenantIdTooLarge { tenant_id, max } => {
+                Self::TenantIdTooLarge { tenant_id, max }
+            }
+        }
     }
 }

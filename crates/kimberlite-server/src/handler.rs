@@ -541,6 +541,9 @@ fn error_to_wire(error: &ServerError) -> (ErrorCode, String) {
             kimberlite::KimberliteError::TableNotFound(_) => {
                 (ErrorCode::TableNotFound, e.to_string())
             }
+            kimberlite::KimberliteError::TenantIdTooLarge { .. } => {
+                (ErrorCode::TenantIdTooLarge, e.to_string())
+            }
             kimberlite::KimberliteError::PositionAhead { .. } => {
                 (ErrorCode::PositionAhead, e.to_string())
             }
@@ -557,9 +560,13 @@ fn error_to_wire(error: &ServerError) -> (ErrorCode, String) {
                 }
                 _ => (ErrorCode::QueryExecutionError, qe.to_string()),
             },
-            kimberlite::KimberliteError::Storage(_) | kimberlite::KimberliteError::Store(_) => {
-                (ErrorCode::StorageError, e.to_string())
-            }
+            kimberlite::KimberliteError::Store(se) => match se {
+                kimberlite::StoreError::EntryTooLarge { .. } => {
+                    (ErrorCode::RowVersionChainTooLarge, se.to_string())
+                }
+                _ => (ErrorCode::StorageError, se.to_string()),
+            },
+            kimberlite::KimberliteError::Storage(_) => (ErrorCode::StorageError, e.to_string()),
             kimberlite::KimberliteError::Kernel(ke) => {
                 if let kimberlite::KernelError::UnexpectedStreamOffset { .. } = &ke {
                     (ErrorCode::OffsetMismatch, ke.to_string())

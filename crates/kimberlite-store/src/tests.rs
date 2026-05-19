@@ -244,6 +244,67 @@ fn test_large_values() {
 }
 
 #[test]
+fn test_same_key_many_versions_does_not_silently_drop() {
+    // Notebar v0.9.0 → 0.9.1 regression. The bcba460 byte-budget split
+    // covers MANY wide ROWS, but not MANY VERSIONS of one row.
+    // Re-`put`ting the same key appends a version to that entry's
+    // VersionChain (MVCC). When the chain grows long enough that the
+    // single LeafEntry's serialized_size exceeds the page byte budget
+    // (4048), splitting can't save us — there's only one entry. The
+    // page-write path used to panic with the generic
+    // `StoreError::PageOverflow`, leaving the seed loop with no
+    // actionable signal. This test pins the failure mode and ensures
+    // the typed `StoreError::EntryTooLarge` (with the offending key
+    // and size) surfaces instead.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("versions.db");
+    let mut store = BTreeStore::open(&path).unwrap();
+
+    // 30 upserts on the SAME key, each carrying a ~500-byte payload.
+    // 30 × ~520 (payload + version overhead) ≈ 15 KiB — well past
+    // a single page.
+    let key = Key::from("hotkey");
+    let mut result_after_overflow: Option<crate::StoreError> = None;
+    for i in 1..=30 {
+        let batch = WriteBatch::new(Offset::new(i)).put(
+            TableId::new(1),
+            key.clone(),
+            Bytes::from(vec![b'x'; 500]),
+        );
+        if let Err(e) = store.apply(batch) {
+            result_after_overflow = Some(e);
+            break;
+        }
+    }
+
+    let err = result_after_overflow
+        .expect("at least one upsert must surface a structured error before silent corruption");
+
+    // The error must be typed (not the generic PageOverflow) so a
+    // caller can branch on it and offer an actionable response.
+    match err {
+        crate::StoreError::EntryTooLarge {
+            key: ref k,
+            entry_size,
+            page_budget,
+        } => {
+            assert_eq!(k, &key, "EntryTooLarge must carry the offending key");
+            assert!(
+                entry_size > page_budget,
+                "entry_size must exceed budget by definition"
+            );
+            assert_eq!(
+                page_budget,
+                crate::types::PAGE_SIZE - crate::types::PAGE_HEADER_SIZE - crate::types::CRC_SIZE
+            );
+        }
+        other => {
+            panic!("expected StoreError::EntryTooLarge with the offending key, got: {other:?}")
+        }
+    }
+}
+
+#[test]
 fn test_wide_rows_trigger_byte_based_split() {
     // Regression for the "page overflow: need 662 bytes, have 416" bug.
     //
