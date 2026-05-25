@@ -150,13 +150,13 @@ hdrhistogram = "7"
 sqlparser = "0.61"
 
 # SQL differential testing
-duckdb = { version = "1.10502", features = ["bundled"] }
+duckdb = { version = "1.10503", features = ["bundled"] }
 
 # UUID
 uuid = { version = "1.23", features = ["v4", "serde"] }
 
 # Decimal arithmetic
-rust_decimal = "1.41"
+rust_decimal = "1.42"
 
 # Memory-mapped I/O
 memmap2 = "0.9"
